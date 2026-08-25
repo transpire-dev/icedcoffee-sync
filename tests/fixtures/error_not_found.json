@@ -1,0 +1,9 @@
+{
+  "scenario": "error_not_found",
+  "method": "GET",
+  "path": "/api/v2/document/Account/NoSuchAccount-XYZ",
+  "sent": null,
+  "status": 404,
+  "content_type": "application/json",
+  "body": "{\"errors\":[{\"type\":\"DoesNotExistError\",\"message\":\"Account NoSuchAccount-XYZ not found\",\"as_table\":false,\"title\":\"Message\",\"indicator\":\"red\"}]}"
+}

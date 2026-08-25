@@ -1,0 +1,33 @@
+[project]
+name = "stolon"
+version = "0.0.1"
+description = "Typed sync and async client for the Frappe and ERPNext REST API"
+authors = [{ name = "Gavin Carothers", email = "gavin@carothers.name" }]
+requires-python = ">=3.14"
+
+dependencies = ["httpx2>=2.0.0"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-timeout>=2.4.0",
+    "pytest-asyncio>=0.24.0",
+    "deptry>=0.24.0",
+    "ty>=0.0.1a32",
+    "ruff>=0.14.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stolon"]
+
+[tool.pytest.ini_options]
+timeout = 180
+timeout_method = "thread"
+asyncio_mode = "auto"
+markers = [
+    "live_frappe: hits a real Frappe site; requires STOLON_TEST_* env vars",
+]

@@ -1,0 +1,9 @@
+{
+  "scenario": "permission_not_provoked",
+  "method": "GET",
+  "path": "/api/v2/document/User?limit=1",
+  "sent": null,
+  "status": 200,
+  "content_type": "application/json",
+  "body": "{\"has_next_page\":false,\"data\":[{\"name\":\"analyst@example.com\"}]}"
+}
