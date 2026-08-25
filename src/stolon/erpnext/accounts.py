@@ -92,6 +92,7 @@ _CHART_FIELDS = [
     "is_group",
     "root_type",
     "account_type",
+    "disabled",
 ]
 
 # A chart this size has never been seen on a live site; it exists so a fuller
@@ -154,6 +155,7 @@ def read_chart(client: _Reader, company: str) -> list[LiveAccount]:
             is_group=bool(row.get("is_group")),
             root_type=row.get("root_type") or "",
             account_type=row.get("account_type") or None,
+            disabled=bool(row.get("disabled")),
         )
         for row in rows
     ]

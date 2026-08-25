@@ -118,6 +118,34 @@ def test_renumber_uses_the_rpc_not_a_field_write() -> None:
     assert report.renumbered == [("Bank Charges - AB", "5202 - Bank Charges - AB")]
 
 
+def test_a_rename_carries_the_charts_name_not_just_its_number() -> None:
+    # A root is matched by root_type, so the live name can be ERPNext's own
+    # ("Application of Funds (Assets)") while the chart says "Assets".
+    # update_account_number sets account_name as well as account_number and
+    # returns the resulting document name, so one call covers both.
+    plan = ChartPlan(
+        creates=[],
+        renumbers=[
+            RenumberAccount(
+                live("Application of Funds (Assets) - AB", "Application of Funds (Assets)"),
+                desired("1000", "Assets", is_group=True),
+            )
+        ],
+        retypes=[],
+        extras=[],
+        refusals=[],
+    )
+    client = FakeClient()
+    report = apply_chart(client, plan, {}, "AB", "Acmebike Cycling")
+    _method, params = next(payload for kind, payload in client.actions if kind == "call")
+    assert params == {
+        "name": "Application of Funds (Assets) - AB",
+        "account_name": "Assets",
+        "account_number": "1000",
+    }
+    assert report.renumbered == [("Application of Funds (Assets) - AB", "1000 - Assets - AB")]
+
+
 def test_retype_writes_only_the_account_type() -> None:
     plan = ChartPlan(
         creates=[],

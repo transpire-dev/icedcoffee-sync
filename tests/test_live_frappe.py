@@ -205,6 +205,18 @@ def _minimal_pdf_bytes() -> bytes:
     return bytes(body)
 
 
+def test_checked_in_account_types_match_the_site(client: Client) -> None:
+    # The offline snapshot is what lets a chart be validated without a network
+    # call. This is the test that notices an ERPNext upgrade moving it.
+    from stolon.erpnext.accounts import ACCOUNT_TYPES, live_account_types
+
+    live = live_account_types(client)
+    assert live == ACCOUNT_TYPES, {
+        "only_on_site": sorted(live - ACCOUNT_TYPES),
+        "only_checked_in": sorted(ACCOUNT_TYPES - live),
+    }
+
+
 def test_upload_file_attaches_a_private_file_to_a_document(client: Client) -> None:
     # Note over Account for the same reason the `note` fixture picks it:
     # harmless and non-submittable, so a failed teardown never leaves junk
