@@ -9,6 +9,7 @@ from stolon.frappe.request import (
     insert_document,
     list_documents,
     update_document,
+    upload_file,
 )
 
 
@@ -140,3 +141,46 @@ def test_call_method_rejects_a_trailing_newline() -> None:
     # guard that looks like a valid path.
     with pytest.raises(ValueError, match="dotted method path"):
         call_method("frappe.client.submit\n")
+
+
+def test_upload_file_targets_the_v2_upload_endpoint() -> None:
+    request = upload_file("Purchase Invoice", "PINV-0001", "invoice.pdf", b"%PDF-1.4")
+    assert request.method == "POST"
+    assert request.path == "/api/v2/method/upload_file"
+
+
+def test_upload_file_sends_the_content_as_a_multipart_file_part() -> None:
+    request = upload_file("Purchase Invoice", "PINV-0001", "invoice.pdf", b"%PDF-1.4")
+    assert request.files == {"file": ("invoice.pdf", b"%PDF-1.4")}
+    assert request.json_body is None
+
+
+def test_upload_file_sends_doctype_docname_as_form_fields() -> None:
+    request = upload_file("Purchase Invoice", "PINV-0001", "invoice.pdf", b"content")
+    assert request.data is not None
+    assert request.data["doctype"] == "Purchase Invoice"
+    assert request.data["docname"] == "PINV-0001"
+
+
+def test_upload_file_defaults_to_private() -> None:
+    request = upload_file("Purchase Invoice", "PINV-0001", "invoice.pdf", b"content")
+    assert request.data is not None
+    assert request.data["is_private"] == 1
+
+
+def test_upload_file_can_be_made_public() -> None:
+    request = upload_file("Purchase Invoice", "PINV-0001", "invoice.pdf", b"content", is_private=False)
+    assert request.data is not None
+    assert request.data["is_private"] == 0
+
+
+def test_upload_file_omits_folder_when_not_given() -> None:
+    request = upload_file("Purchase Invoice", "PINV-0001", "invoice.pdf", b"content")
+    assert request.data is not None
+    assert "folder" not in request.data
+
+
+def test_upload_file_sends_folder_when_given() -> None:
+    request = upload_file("Purchase Invoice", "PINV-0001", "invoice.pdf", b"content", folder="Home/Attachments")
+    assert request.data is not None
+    assert request.data["folder"] == "Home/Attachments"

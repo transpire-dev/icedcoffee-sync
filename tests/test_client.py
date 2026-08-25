@@ -139,6 +139,89 @@ def test_site_config_repr_hides_the_credentials() -> None:
     assert "example.test" in rendered
 
 
+def test_upload_file_sends_a_genuine_multipart_request() -> None:
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen["content_type"] = request.headers["content-type"]
+        seen["body"] = request.content
+        return httpx2.Response(200, json={"data": {"name": "invoice.pdf"}})
+
+    with Client(CONFIG, transport=_transport(handler)) as client:
+        client.upload_file("Purchase Invoice", "PINV-0001", "invoice.pdf", b"%PDF-1.4 body")
+
+    assert str(seen["content_type"]).startswith("multipart/form-data")
+    body = seen["body"]
+    assert isinstance(body, bytes)
+    assert b'name="file"' in body
+    assert b'filename="invoice.pdf"' in body
+    assert b"%PDF-1.4 body" in body
+    assert b'name="doctype"' in body
+    assert b"Purchase Invoice" in body
+    assert b'name="docname"' in body
+    assert b"PINV-0001" in body
+
+
+def test_upload_file_defaults_the_document_to_private() -> None:
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen["body"] = request.content
+        return httpx2.Response(200, json={"data": {"name": "invoice.pdf"}})
+
+    with Client(CONFIG, transport=_transport(handler)) as client:
+        client.upload_file("Purchase Invoice", "PINV-0001", "invoice.pdf", b"content")
+
+    body = seen["body"]
+    assert isinstance(body, bytes)
+    assert b'name="is_private"' in body
+    # The part carrying is_private's value should hold "1", not "0".
+    idx = body.index(b'name="is_private"')
+    assert body[idx : idx + 60].split(b"\r\n\r\n", 1)[1].startswith(b"1")
+
+
+def test_upload_file_still_carries_the_credential() -> None:
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.update(request.headers)
+        return httpx2.Response(200, json={"data": {"name": "invoice.pdf"}})
+
+    with Client(CONFIG, transport=_transport(handler)) as client:
+        client.upload_file("Purchase Invoice", "PINV-0001", "invoice.pdf", b"content")
+
+    assert seen["authorization"] == "token KEY:SECRET"
+
+
+def test_upload_file_returns_the_created_file_document() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json={"data": {"name": "invoice.pdf", "file_url": "/private/files/invoice.pdf"}})
+
+    with Client(CONFIG, transport=_transport(handler)) as client:
+        result = client.upload_file("Purchase Invoice", "PINV-0001", "invoice.pdf", b"content")
+
+    assert result == {"name": "invoice.pdf", "file_url": "/private/files/invoice.pdf"}
+
+
+async def test_async_upload_file_sends_a_genuine_multipart_request() -> None:
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen["content_type"] = request.headers["content-type"]
+        seen["body"] = request.content
+        return httpx2.Response(200, json={"data": {"name": "invoice.pdf"}})
+
+    async with AsyncClient(CONFIG, transport=_transport(handler)) as client:
+        await client.upload_file("Purchase Invoice", "PINV-0001", "invoice.pdf", b"%PDF-1.4 body")
+
+    assert str(seen["content_type"]).startswith("multipart/form-data")
+    body = seen["body"]
+    assert isinstance(body, bytes)
+    assert b'name="file"' in body
+    assert b'filename="invoice.pdf"' in body
+    assert b"%PDF-1.4 body" in body
+
+
 def test_lowercase_authorization_header_cannot_sit_alongside_the_credential() -> None:
     # HTTP header names are case-insensitive, so a lowercase `authorization`
     # would otherwise survive the merge next to the real one -- two credentials

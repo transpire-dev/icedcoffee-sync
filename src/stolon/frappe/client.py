@@ -115,6 +115,8 @@ def _send_args(config: SiteConfig, request: req.Request) -> dict[str, Any]:
         "params": request.params or None,
         "headers": _merge_headers(config, request),
         "json": request.json_body,
+        "data": request.data,
+        "files": request.files,
     }
 
 
@@ -171,6 +173,26 @@ class Client:
     def delete(self, doctype: str, name: str) -> Any:
         """Delete a document."""
         return self._run(req.delete_document(doctype, name))
+
+    def upload_file(
+        self,
+        doctype: str,
+        docname: str,
+        filename: str,
+        content: bytes,
+        *,
+        is_private: bool = True,
+        folder: str | None = None,
+    ) -> Any:
+        """Attach a file to a document, returning the created `File` document.
+
+        Takes the content as bytes rather than a path -- the common caller
+        already has it in memory (an email attachment, a generated PDF), and
+        routing that through a temp file first would be pure ceremony.
+        Private by default: an attachment is financial evidence more often
+        than not, and a public URL is the wrong default for that.
+        """
+        return self._run(req.upload_file(doctype, docname, filename, content, is_private=is_private, folder=folder))
 
     def call(self, dotted_path: str, params: dict[str, Any] | None = None) -> Any:
         """Call a whitelisted server method.
@@ -308,6 +330,28 @@ class AsyncClient:
     async def delete(self, doctype: str, name: str) -> Any:
         """Delete a document."""
         return await self._run(req.delete_document(doctype, name))
+
+    async def upload_file(
+        self,
+        doctype: str,
+        docname: str,
+        filename: str,
+        content: bytes,
+        *,
+        is_private: bool = True,
+        folder: str | None = None,
+    ) -> Any:
+        """Attach a file to a document, returning the created `File` document.
+
+        Takes the content as bytes rather than a path -- the common caller
+        already has it in memory (an email attachment, a generated PDF), and
+        routing that through a temp file first would be pure ceremony.
+        Private by default: an attachment is financial evidence more often
+        than not, and a public URL is the wrong default for that.
+        """
+        return await self._run(
+            req.upload_file(doctype, docname, filename, content, is_private=is_private, folder=folder)
+        )
 
     async def call(self, dotted_path: str, params: dict[str, Any] | None = None) -> Any:
         """Call a whitelisted server method.

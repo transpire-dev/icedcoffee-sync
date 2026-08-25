@@ -170,3 +170,71 @@ def test_call_round_trips_a_safe_read_only_rpc(client: Client) -> None:
     count = client.call("frappe.client.get_count", {"doctype": "Account"})
     assert isinstance(count, int)
     assert count >= 0
+
+
+def _minimal_pdf_bytes() -> bytes:
+    """A structurally valid, byte-accurate minimal single-page PDF.
+
+    Frappe scans every uploaded PDF for embedded JavaScript on save
+    (`pdf_contains_js` in `frappe/utils/pdf.py`, via `pypdf.PdfReader`), so an
+    arbitrary byte string with a `%PDF` header is not enough -- it must
+    actually parse. A hand-rolled placeholder without a real cross-reference
+    table failed live with `PdfStreamError: Stream has ended unexpectedly`
+    before this was built with correct byte offsets.
+    """
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> >>",
+    ]
+    body = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for i, content in enumerate(objects, start=1):
+        offsets.append(len(body))
+        body += f"{i} 0 obj\n".encode()
+        body += content + b"\n"
+        body += b"endobj\n"
+    xref_offset = len(body)
+    n = len(objects) + 1
+    xref = bytearray(f"xref\n0 {n}\n".encode())
+    xref += b"0000000000 65535 f \n"
+    for off in offsets[1:]:
+        xref += f"{off:010d} 00000 n \n".encode()
+    body += xref
+    body += f"trailer\n<< /Size {n} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n".encode()
+    return bytes(body)
+
+
+def test_upload_file_attaches_a_private_file_to_a_document(client: Client) -> None:
+    # Note over Account for the same reason the `note` fixture picks it:
+    # harmless and non-submittable, so a failed teardown never leaves junk
+    # behind. A fresh Note per run (title carries a uuid4) rather than the
+    # `note` fixture, because this test also needs to clean up the File it
+    # creates -- doing both in one try/finally keeps the ordering explicit
+    # (file before document; a document with a dangling attachment is a
+    # smaller mess than an orphaned private file with no document to point
+    # at it, so this order fails safe if teardown is interrupted partway).
+    title = f"stolon-live-test-{uuid.uuid4()}"
+    note = client.insert("Note", {"title": title, "content": "<p>upload target</p>"})
+    note_name = note["name"]
+    file_name: str | None = None
+    try:
+        content = _minimal_pdf_bytes()
+        uploaded = client.upload_file("Note", note_name, "evidence.pdf", content)
+        file_name = uploaded["name"]
+
+        assert uploaded["file_name"] == "evidence.pdf"
+        assert uploaded["attached_to_doctype"] == "Note"
+        assert uploaded["attached_to_name"] == note_name
+        assert bool(uploaded["is_private"]), "upload_file must default to private"
+
+        fetched = client.get("File", file_name)
+        assert fetched["attached_to_doctype"] == "Note"
+        assert fetched["attached_to_name"] == note_name
+        assert bool(fetched["is_private"])
+    finally:
+        if file_name is not None:
+            with contextlib.suppress(DoesNotExistError):
+                client.delete("File", file_name)
+        with contextlib.suppress(DoesNotExistError):
+            client.delete("Note", note_name)

@@ -16,13 +16,22 @@ API_V2 = "/api/v2"
 
 @dataclasses.dataclass(frozen=True)
 class Request:
-    """A fully described HTTP call, ready for either client to send."""
+    """A fully described HTTP call, ready for either client to send.
+
+    `json_body` covers every request but one: Frappe's file upload endpoint
+    takes multipart form data, not JSON. `data` and `files` carry that case --
+    kept as distinct fields rather than overloading `json_body`, so a request
+    is unambiguously either JSON or multipart and the send side can tell which
+    by checking `files`.
+    """
 
     method: str
     path: str
     params: dict[str, str] = dataclasses.field(default_factory=dict)
     headers: dict[str, str] = dataclasses.field(default_factory=dict)
     json_body: dict[str, Any] | None = None
+    data: dict[str, Any] | None = None
+    files: dict[str, tuple[str, bytes]] | None = None
 
 
 def auth_header(key: str, secret: str) -> dict[str, str]:
@@ -106,3 +115,31 @@ def call_method(dotted_path: str, params: dict[str, Any] | None = None) -> Reque
     if not _DOTTED_PATH.fullmatch(dotted_path):
         raise ValueError(f"not a dotted method path: {dotted_path!r}")
     return Request("POST", f"{API_V2}/method/{dotted_path}", json_body=params or {})
+
+
+def upload_file(
+    doctype: str,
+    docname: str,
+    filename: str,
+    content: bytes,
+    *,
+    is_private: bool = True,
+    folder: str | None = None,
+) -> Request:
+    """Attach a file to a document via Frappe's multipart upload endpoint.
+
+    `/api/v2/method/upload_file` is the one server route this client sends
+    multipart to -- everything else is JSON. Confirmed against Frappe's
+    `develop` branch (`frappe/handler.py:upload_file`, routed at
+    `frappe/api/v2.py`): the file must ride in a part literally named `file`
+    (the handler reads it from `frappe.request.files["file"]`), and
+    `doctype`/`docname`/`folder`/`is_private` are plain form fields, not JSON.
+    `is_private` defaults to true here -- Frappe's own server-side default is
+    also private (`frappe.form_dict.get("is_private", 1)`), but a client for
+    financial documents states that choice rather than leaning on the
+    server's default.
+    """
+    data: dict[str, Any] = {"doctype": doctype, "docname": docname, "is_private": 1 if is_private else 0}
+    if folder is not None:
+        data["folder"] = folder
+    return Request("POST", f"{API_V2}/method/upload_file", data=data, files={"file": (filename, content)})
