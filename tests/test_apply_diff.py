@@ -225,6 +225,103 @@ def test_refusal_detail_names_the_account_and_the_conflict() -> None:
     assert plan.refusals[0].live_document_names == ("Bank Charges - AB",)
 
 
+# --- number collisions -------------------------------------------------------
+#
+# ERPNext enforces a unique account_number per company. The disposable test
+# site used everywhere else in this file has no numbers at all, so no create
+# ever contended for one -- these fixtures give the live site a numbered chart
+# of its own, the shape that actually produced the defect.
+
+
+def test_create_whose_number_is_held_by_unrelated_live_account_is_refused() -> None:
+    plan = diff(
+        chart(desired("5299", "UNCATEGORISED")),
+        site(live("5299 - Something Else - AB", "Something Else", number="5299")),
+        set(),
+    )
+    assert [r.reason for r in plan.refusals] == [RefusalReason.NUMBER_COLLISION]
+    assert "UNCATEGORISED" in plan.refusals[0].detail
+    assert "5299 - Something Else - AB" in plan.refusals[0].detail
+    assert plan.refusals[0].live_document_names == ("5299 - Something Else - AB",)
+    assert not plan.is_applyable
+
+
+def test_create_whose_number_is_vacated_by_a_renumber_in_the_same_plan_is_not_refused() -> None:
+    # The live account currently sitting on 5299 is itself being renumbered to
+    # 5301 by this plan. Renumbers run before creates, so 5299 is free by the
+    # time the create fires -- this must not be a collision, or an ordinary
+    # renumbering plan could never be applied.
+    plan = diff(
+        chart(
+            desired("5301", "Old Category"),
+            desired("5299", "UNCATEGORISED"),
+        ),
+        site(live("5299 - Old Category - AB", "Old Category", number="5299")),
+        set(),
+    )
+    assert [c.desired.number for c in plan.creates] == ["5299"]
+    assert [(r.live.document_name, r.desired.number) for r in plan.renumbers] == [("5299 - Old Category - AB", "5301")]
+    assert not plan.refusals
+    assert plan.is_applyable
+
+
+def test_matched_account_keeping_its_own_number_is_not_reported_as_colliding_with_itself() -> None:
+    # A root matched by root_type but renamed still produces a RenumberAccount
+    # (rename and renumber are the same ERPNext call) even when the number
+    # does not change. The account trivially still holds its own number, and
+    # that must not read as a collision with itself.
+    plan = diff(
+        [DesiredAccount("1000", "Assets", None, True, "Asset", None)],
+        [
+            LiveAccount(
+                "1000 - Application of Funds (Assets) - AB",
+                "1000",
+                "Application of Funds (Assets)",
+                None,
+                True,
+                "Asset",
+            )
+        ],
+        set(),
+    )
+    assert [(r.live.document_name, r.desired.number) for r in plan.renumbers] == [
+        ("1000 - Application of Funds (Assets) - AB", "1000")
+    ]
+    assert not plan.refusals
+    assert plan.is_applyable
+
+
+def test_renumber_whose_target_number_is_held_by_unrelated_live_account_is_refused() -> None:
+    plan = diff(
+        chart(desired("5210", "Payroll")),
+        site(
+            live("Payroll - AB", "Payroll"),
+            live("5210 - Something Else - AB", "Something Else", number="5210"),
+        ),
+        set(),
+    )
+    assert [r.reason for r in plan.refusals] == [RefusalReason.NUMBER_COLLISION]
+    assert "Payroll" in plan.refusals[0].detail
+    assert "5210 - Something Else - AB" in plan.refusals[0].detail
+    assert not plan.is_applyable
+
+
+def test_number_collision_refusal_makes_the_whole_plan_unapplyable() -> None:
+    # A single collision blocks the plan even when everything else in it is
+    # fine, consistent with every other refusal reason.
+    plan = diff(
+        chart(
+            desired("5299", "UNCATEGORISED"),
+            desired("5301", "Legit New Account"),
+        ),
+        site(live("5299 - Something Else - AB", "Something Else", number="5299")),
+        set(),
+    )
+    assert {c.desired.number for c in plan.creates} == {"5299", "5301"}
+    assert [r.reason for r in plan.refusals] == [RefusalReason.NUMBER_COLLISION]
+    assert not plan.is_applyable
+
+
 # --- roots ------------------------------------------------------------------
 #
 # ERPNext will not insert an Account without a parent_account (HTTP 417,

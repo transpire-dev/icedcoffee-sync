@@ -21,7 +21,7 @@ creates, and applying that duplicates the whole branch. Worse, the second run
 then matches cleanly and reports no changes -- an idempotency check passes over
 an already-wrong chart.
 
-The output separates four kinds of outcome deliberately:
+The output separates three kinds of outcome deliberately:
 
 - changes we will make (creates, renumbers, retypes),
 - accounts on the site that the chart does not describe (extras), which are
@@ -52,6 +52,7 @@ class RefusalReason(enum.StrEnum):
     GROUP_FLAG_CHANGED = "group_flag_changed"
     ROOT_TYPE_CHANGED = "root_type_changed"
     ROOT_NOT_UNIQUE = "root_not_unique"
+    NUMBER_COLLISION = "number_collision"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -154,6 +155,7 @@ def diff(
         live_children=_live_children(live),
     )
     walk.roots()
+    walk.number_collisions(live)
     extras = [ExtraAccount(a) for a in live if a.document_name not in walk.matched]
     return ChartPlan(walk.creates, walk.renumbers, walk.retypes, extras, walk.refusals)
 
@@ -281,6 +283,60 @@ class _Walk:
                 self.pair(kid, candidates[0])
             else:
                 self.create(kid)
+
+    def number_collisions(self, live: list[LiveAccount]) -> None:
+        """Refuse any create or renumber that would land on a number a live account still holds.
+
+        ERPNext enforces a unique account_number per company, so an insert or
+        rename that assigns a number another live account currently carries
+        fails outright -- and unlike `reconcile`'s checks, this one is not
+        local to a matched pair: the account holding the contested number can
+        be anywhere in the tree, matched or not.
+
+        The number is checked against the state *after* this plan's own
+        renumbers land, not the state on the site today, because
+        `apply_chart` runs every renumber before any create. A live account
+        this same plan is moving off of the contested number will not hold it
+        any more by the time a create or another renumber would claim it, so
+        that combination is not a collision -- only a number nothing in this
+        plan vacates can still be occupied when the create runs. Refusing the
+        vacated case would make an ordinary renumbering plan permanently
+        unapplyable, since the same collision would be reported and refused
+        on every subsequent run forever.
+
+        A number an account already holds is never a collision with that same
+        account: `check` compares document names, so a renumber that keeps its
+        own number (only the name is changing) is never reported as clashing
+        with itself.
+
+        Args:
+            live: Every account the site has for the company, the same list
+                `diff` was given -- the contested account may be one this walk
+                never matched or visited.
+        """
+        live_by_number = {a.number: a for a in live if a.number}
+        vacated = {r.live.number for r in self.renumbers if r.live.number and r.live.number != r.desired.number}
+
+        def check(want: DesiredAccount, counterpart: LiveAccount | None) -> None:
+            if not want.number or want.number in vacated:
+                return
+            contested = live_by_number.get(want.number)
+            if contested is None:
+                return
+            if counterpart is not None and contested.document_name == counterpart.document_name:
+                return
+            self.refuse(
+                want,
+                RefusalReason.NUMBER_COLLISION,
+                f"chart assigns {want.number} to {want.name!r} but {want.number} is held by "
+                f"{contested.document_name!r}",
+                [contested],
+            )
+
+        for change in self.creates:
+            check(change.desired, None)
+        for change in self.renumbers:
+            check(change.desired, change.live)
 
     def create(self, want: DesiredAccount) -> None:
         """Create an unmatched account and, with it, everything beneath it."""

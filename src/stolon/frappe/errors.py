@@ -55,6 +55,19 @@ class LinkExistsError(FrappeError):
     """The document is linked from elsewhere and cannot be deleted."""
 
 
+class ChildExistsError(FrappeError):
+    """The document is a node in a tree and still has children.
+
+    Frappe's nested-set model (used by ERPNext's Account, among others)
+    refuses to delete a node with children -- delete or move the children
+    first. Measured against a live site as `error_type ==
+    "NestedSetChildExistsError"`, status 417, message like "Cannot delete
+    X as it has child nodes"; distinct from both `LinkExistsError` (a
+    document elsewhere references this one) and `ValidationError` (nothing
+    to do with the tree at all).
+    """
+
+
 class TimestampMismatchError(FrappeError):
     """The document changed after it was read.
 
@@ -75,6 +88,7 @@ _BY_TYPE: dict[str, type[FrappeError]] = {
     "DoesNotExistError": DoesNotExistError,
     "DuplicateEntryError": DuplicateEntryError,
     "LinkExistsError": LinkExistsError,
+    "NestedSetChildExistsError": ChildExistsError,
     "TimestampMismatch": TimestampMismatchError,
     "TimestampMismatchError": TimestampMismatchError,
 }

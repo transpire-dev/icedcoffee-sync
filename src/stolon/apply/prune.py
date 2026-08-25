@@ -21,13 +21,21 @@ guessing at rules better enforced by the system that owns them; a real
 That referential integrity turned out to include accounts ERPNext will not
 delete at all -- wired into its own defaults or tax templates -- and says so:
 "You can disable this Account instead of deleting it." `execute_prune` takes
-that literally. A delete that fails falls back to disabling the account
-rather than being treated as a final failure: disabling is the retirement
-path ERPNext itself supports, it is strictly less destructive than deleting
-and reversible with one field write, and every candidate has already passed
-`plan_prune`'s checks. The fallback never inspects the delete error's
-message -- attempt-then-fallback is robust on its own, and matching text
-would silently stop working the day ERPNext rewords the string.
+that literally. A delete refused with `LinkExistsError`, `ValidationError`,
+or `ChildExistsError` falls back to disabling the account rather than being
+treated as a final failure: disabling is the retirement path ERPNext itself
+supports, it is strictly less destructive than deleting, and reversible with
+one field write, and every candidate has already passed `plan_prune`'s
+checks. The fallback never inspects the delete error's message --
+attempt-then-fallback needs no such match, and matching text would silently
+stop working the day ERPNext rewords the string.
+
+That exception set is deliberately narrow, not `except FrappeError`. All
+three named classes mean the server refused on business grounds; anything
+else -- `RateLimitError`, an unclassified 5xx -- is infrastructure trouble a
+retry might resolve, and silently disabling an account because a request got
+rate limited would be a much worse mistake than a noisy failure. Those
+propagate out of `execute_prune` uncaught.
 """
 
 from __future__ import annotations
@@ -37,7 +45,7 @@ import enum
 from typing import Any, Protocol
 
 from stolon.apply.model import LiveAccount
-from stolon.frappe.errors import FrappeError
+from stolon.frappe.errors import ChildExistsError, FrappeError, LinkExistsError, ValidationError
 
 
 class PruneReason(enum.StrEnum):
@@ -107,7 +115,14 @@ def plan_prune(
         live: Every live account, extras and matched accounts alike -- needed
             to tell whether an extra's child is itself an extra or a
             surviving matched account.
-        accounts_with_entries: Live document names carrying ledger entries.
+        accounts_with_entries: Live document names carrying ledger entries, as
+            of one probe taken at plan time. It is a snapshot, not a live
+            check: an account that gains its first ledger entry between that
+            probe and the operator's confirmation is cleared to delete here,
+            then refused by ERPNext itself when `execute_prune` actually tries
+            it (a `LinkExistsError`, since it now carries history), and falls
+            back to disabling it instead -- reversible with one field write,
+            and reported in the run's output as disabled rather than deleted.
 
     Returns:
         A plan whose deletes are ordered deepest first, so a parent is never
@@ -210,24 +225,47 @@ class PruneReport:
     failed: list[tuple[str, str]] = dataclasses.field(default_factory=list)
 
 
+# The `FrappeError` subclasses that mean ERPNext refused a delete on business
+# grounds rather than infrastructure trouble: LinkExistsError is the "you can
+# disable this Account instead" refusal itself, ValidationError covers the
+# generic business-rule refusal a disabled child can also leave on its parent,
+# and ChildExistsError (Frappe's NestedSetChildExistsError) is the "has child
+# nodes" cascade specifically -- measured on a live site as its own error_type,
+# neither a LinkExistsError nor a ValidationError, so it needs its own place in
+# this tuple or that whole cascade path silently stops falling back to
+# disable. Anything else -- RateLimitError, an unclassified 5xx -- is left to
+# propagate, because a retry might clear it and silently disabling an account
+# over a transient error would be a worse mistake than a noisy failure.
+_DISABLE_ELIGIBLE: tuple[type[FrappeError], ...] = (LinkExistsError, ValidationError, ChildExistsError)
+
+
 def execute_prune(client: _Client, plan: PrunePlan) -> PruneReport:
     """Delete each planned account in order, falling back to disable, continuing past a failure.
 
-    A `FrappeError` on the delete -- most commonly `LinkExistsError`, when
-    something still references the account, or a validation error naming the
-    account as wired into ERPNext's own defaults or tax templates -- is
-    caught per account and answered with a second attempt: disable the
-    account instead. That fallback runs unconditionally on any delete
-    failure, never on a match against the error's text, because
-    attempt-then-fallback needs no such match and text matching is brittle.
-    Only when the disable attempt *also* raises is the account recorded as
-    failed, carrying that second error's message -- the delete's own message
-    is superseded, not lost information worth keeping, since the fallback
-    conclusively answers whether the account could be retired at all.
+    A delete failing with `LinkExistsError`, `ValidationError`, or
+    `ChildExistsError` is caught per account and answered with a second
+    attempt: disable the account instead. That fallback runs on those
+    classes only, never on a match against the error's text --
+    attempt-then-fallback needs no such match, and matching text would
+    silently stop working the day ERPNext rewords the string. Any other
+    `FrappeError` (`RateLimitError`, an unclassified 5xx) propagates out of
+    this call uncaught: it signals infrastructure trouble a retry might
+    resolve, not a business refusal, and disabling an account over that
+    would be the wrong call.
 
-    Neither a delete failure nor a disable failure ends the run: one
-    unresolvable account is the same shape of problem as a refusal, and
-    should not stop the rest from being cleared.
+    Only when the disable attempt *also* raises one of those same three
+    classes is the account recorded as failed, carrying that second error's
+    message -- the delete's own message is superseded, not lost information
+    worth keeping, since the fallback conclusively answers whether the
+    account could be retired at all. A disable failing with anything else
+    propagates uncaught too, symmetrically with the delete: infrastructure
+    trouble is infrastructure trouble regardless of which of the two calls
+    hit it.
+
+    Neither a delete failure eligible for fallback nor a disable failure
+    on business grounds ends the run: one unresolvable account is the same
+    shape of problem as a refusal, and should not stop the rest from being
+    cleared.
 
     Args:
         client: Anything that can delete or update an Account document.
@@ -237,13 +275,18 @@ def execute_prune(client: _Client, plan: PrunePlan) -> PruneReport:
     Returns:
         What was deleted, what was disabled instead, and what failed both
         ways along with the message from the second `FrappeError`.
+
+    Raises:
+        FrappeError: A delete or the disable fallback it triggered failed
+            with something other than `LinkExistsError`, `ValidationError`,
+            or `ChildExistsError`.
     """
     report = PruneReport()
     for change in plan.deletes:
         name = change.live.document_name
         try:
             client.delete("Account", name)
-        except FrappeError:
+        except _DISABLE_ELIGIBLE:
             _fall_back_to_disable(client, name, report)
         else:
             report.deleted.append(name)
@@ -251,10 +294,20 @@ def execute_prune(client: _Client, plan: PrunePlan) -> PruneReport:
 
 
 def _fall_back_to_disable(client: _Client, name: str, report: PruneReport) -> None:
-    """Disable an account whose delete just failed, recording the outcome."""
+    """Disable an account whose delete just failed, recording the outcome.
+
+    Catches only `_DISABLE_ELIGIBLE` -- the same tuple the delete attempt
+    checks -- so this stays symmetric with it: those classes mean the server
+    refused the disable on business grounds too, and the account is recorded
+    as failed to retire either way. Anything else, `RateLimitError` chief
+    among them, propagates out of `execute_prune` uncaught rather than being
+    recorded as a business failure; disabling was already the fallback for a
+    business refusal, and treating infrastructure trouble as one more silently
+    accepts a wrong outcome that a retry might have avoided.
+    """
     try:
         client.update("Account", name, {"disabled": 1})
-    except FrappeError as error:
+    except _DISABLE_ELIGIBLE as error:
         report.failed.append((name, str(error)))
     else:
         report.disabled.append(name)

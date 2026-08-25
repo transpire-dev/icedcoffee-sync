@@ -3,9 +3,11 @@ import pathlib
 
 import pytest
 from stolon.frappe.errors import (
+    ChildExistsError,
     DoesNotExistError,
     DuplicateEntryError,
     FrappeError,
+    LinkExistsError,
     RateLimitError,
     TimestampMismatchError,
     ValidationError,
@@ -120,3 +122,20 @@ def test_captured_validation_fixture_maps_to_validation_error() -> None:
     assert error.status == 417
     assert error.server_traceback is not None
     assert "Traceback" not in error.message
+
+
+def test_nested_set_child_exists_maps_to_child_exists_error() -> None:
+    # Measured against a live site: deleting a group Account that still has
+    # children returns exactly this shape -- error_type
+    # "NestedSetChildExistsError" at 417 -- and it is neither a
+    # LinkExistsError nor a ValidationError, so it needs its own class or
+    # stolon.apply.prune's disable fallback silently stops covering it.
+    error = error_from_response(
+        417, _v2("NestedSetChildExistsError", "Cannot delete 1000 - Assets - AB as it has child nodes")
+    )
+    assert isinstance(error, ChildExistsError)
+    assert not isinstance(error, LinkExistsError)
+    assert not isinstance(error, ValidationError)
+    assert error.error_type == "NestedSetChildExistsError"
+    assert error.status == 417
+    assert "has child nodes" in error.message
