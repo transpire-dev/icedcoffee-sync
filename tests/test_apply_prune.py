@@ -40,6 +40,22 @@ def test_a_whole_extra_subtree_is_deletable_deepest_first() -> None:
     assert [d.live.document_name for d in plan.deletes] == ["Old Leaf - AB", "Old Group - AB"]
 
 
+def test_a_group_and_both_its_children_delete_children_first() -> None:
+    # Measured live: a group whose delete is attempted before its children
+    # have actually been deleted comes back ChildExistsError ("has child
+    # nodes") and falls back to disable, leaving its account number
+    # occupied. Both children -- not just one -- must precede the group.
+    root = live("Expenses - AB", "Expenses")
+    group = live("Old Group - AB", "Old Group", parent="Expenses - AB", is_group=True)
+    child_a = live("Old Leaf A - AB", "Old Leaf A", parent="Old Group - AB")
+    child_b = live("Old Leaf B - AB", "Old Leaf B", parent="Old Group - AB")
+    plan = plan_prune([group, child_a, child_b], [root, group, child_a, child_b], set())
+    names = [d.live.document_name for d in plan.deletes]
+    assert names.index("Old Leaf A - AB") < names.index("Old Group - AB")
+    assert names.index("Old Leaf B - AB") < names.index("Old Group - AB")
+    assert "Expenses - AB" not in names  # a root is never deleted
+
+
 def test_a_parent_whose_child_survives_is_refused() -> None:
     # Defensive: tree matching should make this unreachable, so it fires only
     # when that reasoning is wrong.
@@ -60,12 +76,16 @@ def test_a_refused_account_does_not_block_the_others() -> None:
     assert len(plan.refusals) == 1
 
 
-def test_an_already_disabled_extra_is_skipped_entirely() -> None:
-    # Neither a delete nor a refusal: a prior run (or execute_prune's own
-    # fallback) already retired it, and there is nothing left to decide.
+def test_an_already_disabled_extra_is_still_attempted_for_delete() -> None:
+    # A disabled extra still holds its account number. Skipping it forever
+    # would leave that number permanently occupied even once nothing else
+    # stands in the way of actually deleting it -- so it goes through the
+    # same checks as any other extra and, absent a real refusal, is
+    # attempted for delete like everything else. `execute_prune` is what
+    # tells a genuine re-refusal apart from a fresh success.
     leaf = live("Cash - AB", "Cash", parent="Expenses - AB", disabled=True)
     plan = plan_prune([leaf], [leaf], set())
-    assert not plan.deletes
+    assert [d.live.document_name for d in plan.deletes] == ["Cash - AB"]
     assert not plan.refusals
 
 
@@ -168,6 +188,35 @@ def test_a_delete_refused_with_child_exists_falls_back_to_disable() -> None:
     assert client.deleted == []
     assert report.disabled == ["Old Leaf - AB", "Old Group - AB"]
     assert report.failed == []
+
+
+def test_a_delete_that_succeeds_on_an_already_disabled_extra_is_recorded_as_deleted() -> None:
+    # Retrying a previously-disabled extra can genuinely succeed now --
+    # nothing about "already disabled" means "permanently stuck".
+    disabled_leaf = live("Cash - AB", "Cash", parent="Expenses - AB", disabled=True)
+    plan = PrunePlan([DeleteAccount(disabled_leaf)], [])
+    client = FakeClient()
+    report = execute_prune(client, plan)
+    assert client.deleted == ["Cash - AB"]
+    assert report.deleted == ["Cash - AB"]
+    assert report.already_disabled == []
+
+
+def test_a_delete_refused_on_an_already_disabled_extra_is_recorded_as_already_disabled() -> None:
+    # The idempotency case this bucket exists for: re-disabling something
+    # already disabled would be a no-op write, and counting it as `failed`
+    # would be dishonest -- it is not stuck, it is exactly where it was
+    # before this run, still occupying its account number.
+    from stolon.frappe.errors import LinkExistsError
+
+    disabled_leaf = live("Cash - AB", "Cash", parent="Expenses - AB", disabled=True)
+    plan = PrunePlan([DeleteAccount(disabled_leaf)], [])
+    client = FakeClient(failing_delete={"Cash - AB": LinkExistsError("still linked")})
+    report = execute_prune(client, plan)
+    assert report.already_disabled == ["Cash - AB"]
+    assert report.disabled == []
+    assert report.failed == []
+    assert client.updated == []
 
 
 def test_a_delete_refused_with_rate_limit_propagates_and_does_not_disable() -> None:

@@ -118,6 +118,51 @@ def test_renumber_uses_the_rpc_not_a_field_write() -> None:
     assert report.renumbered == [("Bank Charges - AB", "5202 - Bank Charges - AB")]
 
 
+def test_renumbers_run_in_dependency_order() -> None:
+    # Measured live: apply_chart ran plan.renumbers in plan order and died
+    # -- "Current Assets" tried to take 1100 while "Cash In Hand" (the
+    # account actually sitting there) hadn't renumbered away from it yet.
+    # Listed here in that same (wrong) plan order; the executor must still
+    # run Cash In Hand's renumber first.
+    current_assets = RenumberAccount(
+        live("1100-1600 - Current Assets - AB", "Current Assets", "1100-1600"),
+        desired("1100", "Current Assets", is_group=True),
+    )
+    cash_in_hand = RenumberAccount(
+        live("1100 - Cash In Hand - AB", "Cash In Hand", "1100"),
+        desired("1120", "Cash In Hand"),
+    )
+    plan = ChartPlan(creates=[], renumbers=[current_assets, cash_in_hand], retypes=[], extras=[], refusals=[])
+    client = FakeClient()
+    apply_chart(client, plan, {}, "AB", "Acmebike Cycling")
+    call_names = [payload[1]["name"] for kind, payload in client.actions if kind == "call"]
+    assert call_names == ["1100 - Cash In Hand - AB", "1100-1600 - Current Assets - AB"]
+
+
+def test_a_renumber_cycle_parks_before_either_renumber_runs() -> None:
+    # A wants B's number and B wants A's -- neither can go first without
+    # parking one of them onto a temporary number.
+    a = RenumberAccount(live("A - AB", "A", "10"), desired("20", "A"))
+    b = RenumberAccount(live("B - AB", "B", "20"), desired("10", "B"))
+    plan = ChartPlan(creates=[], renumbers=[a, b], retypes=[], extras=[], refusals=[])
+    client = FakeClient()
+    report = apply_chart(client, plan, {}, "AB", "Acmebike Cycling")
+
+    call_payloads = [payload for kind, payload in client.actions if kind == "call"]
+    assert call_payloads[0][1]["account_number"] == "910"  # the park comes first
+    assert call_payloads[0][1]["name"] == "A - AB"
+    assert call_payloads[0][1]["account_name"] == "A"  # unchanged by the park
+
+    # A's real renumber (last) must address the account by its post-park
+    # name, not the name it had before parking -- that document no longer
+    # exists under its original name.
+    assert call_payloads[-1][1]["name"] == "910 - A - AB"
+    assert call_payloads[-1][1]["account_number"] == "20"
+
+    assert report.parked == [("A - AB", "910", "910 - A - AB")]
+    assert report.renumbered == [("B - AB", "10 - B - AB"), ("A - AB", "20 - A - AB")]
+
+
 def test_a_rename_carries_the_charts_name_not_just_its_number() -> None:
     # A root is matched by root_type, so the live name can be ERPNext's own
     # ("Application of Funds (Assets)") while the chart says "Assets".

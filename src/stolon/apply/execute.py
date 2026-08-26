@@ -5,9 +5,13 @@ parent's *document name*, and a renumber changes that name -- so creating first
 would link a child to a name that is about to stop existing. Renumbering first
 means every parent's name is final before anything references it.
 
-Renumbers among themselves need no ordering: an account's document name does
-not contain its parent's, so renaming a parent updates its children's links
-without changing their names.
+Renumbers need their own order among themselves, though: measured live, a
+plan renumbering "Current Assets" to 1100 before "Cash In Hand" (the account
+actually sitting at 1100) had renumbered away from it died with a plain
+"number already used" error. `stolon.apply.order.order_renumbers` works out
+that order -- and, when two or more renumbers form a genuine cycle (each
+wanting a number only another member of the same cycle is about to vacate),
+inserts a park step that moves one of them to a temporary number first.
 """
 
 from __future__ import annotations
@@ -15,9 +19,9 @@ from __future__ import annotations
 import dataclasses
 from typing import Any, Protocol
 
-from stolon.apply.diff import ChartPlan
-from stolon.apply.model import DesiredAccount
-from stolon.apply.order import order_creates
+from stolon.apply.diff import ChartPlan, RenumberAccount
+from stolon.apply.model import DesiredAccount, LiveAccount
+from stolon.apply.order import ParkStep, order_creates, order_renumbers
 from stolon.erpnext.accounts import document_name
 
 RENUMBER_METHOD = "erpnext.accounts.doctype.account.account.update_account_number"
@@ -39,11 +43,85 @@ class _Writer(Protocol):
 
 @dataclasses.dataclass
 class ApplyReport:
-    """What actually happened, for printing back to the operator."""
+    """What actually happened, for printing back to the operator.
+
+    `parked` is (old document name, temporary number, resulting document
+    name) for every account `order_renumbers` had to move out of the way to
+    break a renumbering cycle -- distinct from `renumbered`, which is only
+    the moves the chart actually wanted. A parked account's real renumber
+    still runs and lands in `renumbered` once it does.
+    """
 
     created: list[str] = dataclasses.field(default_factory=list)
     renumbered: list[tuple[str, str]] = dataclasses.field(default_factory=list)
+    parked: list[tuple[str, str, str]] = dataclasses.field(default_factory=list)
     retyped: list[str] = dataclasses.field(default_factory=list)
+
+
+def _execute_renumbers(
+    client: _Writer, renumbers: list[RenumberAccount], abbr: str, report: ApplyReport
+) -> dict[str, str]:
+    """Run every renumber, and any park step `order_renumbers` had to insert, in order.
+
+    A parked account's document name changes twice -- once to its temporary
+    number, once to its real one -- so `current_name` tracks each renumbered
+    account's *current* document name (keyed by its original one) rather than
+    trusting `RenumberAccount.live.document_name`, which only ever holds the
+    name it had before this run touched it at all.
+
+    Returns:
+        The same desired-number -> final-document-name map `apply_chart`
+        threads through creates and retypes.
+    """
+    resolved: dict[str, str] = {}
+    current_name: dict[str, str] = {}
+
+    def name_of(live: LiveAccount) -> str:
+        return current_name.get(live.document_name, live.document_name)
+
+    for step in order_renumbers(renumbers):
+        if isinstance(step, ParkStep):
+            new_name = client.call(
+                RENUMBER_METHOD,
+                {
+                    "name": name_of(step.live),
+                    "account_name": step.live.name,
+                    "account_number": step.temporary_number,
+                },
+            )
+            new_name = (
+                str(new_name)
+                if new_name
+                else _swap_leading_number(step.live.document_name, step.live.number, step.temporary_number)
+            )
+            current_name[step.live.document_name] = new_name
+            report.parked.append((step.live.document_name, step.temporary_number, new_name))
+            continue
+
+        new_name = client.call(
+            RENUMBER_METHOD,
+            {
+                "name": name_of(step.live),
+                "account_name": step.desired.name,
+                "account_number": step.desired.number,
+            },
+        )
+        new_name = str(new_name) if new_name else document_name(step.desired.name, abbr, step.desired.number)
+        resolved[step.desired.number] = new_name
+        report.renumbered.append((step.live.document_name, new_name))
+
+    return resolved
+
+
+def _swap_leading_number(old_document_name: str, old_number: str, new_number: str) -> str:
+    """Fallback when the server returns no name: swap just the leading number.
+
+    A document name is `"{number} - {name} - {abbr}"`; only the number
+    changed, so replacing that leading prefix reproduces it without needing
+    the abbreviation as a separate input (mirrors `stolon.apply.park`'s
+    identical fallback for the same reason).
+    """
+    return old_document_name.replace(f"{old_number} - ", f"{new_number} - ", 1)
 
 
 def apply_chart(
@@ -59,22 +137,7 @@ def apply_chart(
         raise PlanRefusedError(f"plan carries {len(plan.refusals)} refusal(s): {reasons}")
 
     report = ApplyReport()
-
-    # Track each desired account's live document name as it becomes final, so a
-    # child created later links to the right parent.
-    resolved: dict[str, str] = {}
-    for change in plan.renumbers:
-        new_name = client.call(
-            RENUMBER_METHOD,
-            {
-                "name": change.live.document_name,
-                "account_name": change.desired.name,
-                "account_number": change.desired.number,
-            },
-        )
-        new_name = str(new_name) if new_name else document_name(change.desired.name, abbr, change.desired.number)
-        resolved[change.desired.number] = new_name
-        report.renumbered.append((change.live.document_name, new_name))
+    resolved = _execute_renumbers(client, plan.renumbers, abbr, report)
 
     for change in order_creates(plan.creates, by_number):
         want = change.desired

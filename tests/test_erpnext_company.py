@@ -1,81 +1,133 @@
-"""Company default accounts, and refusing to write a field that does not exist."""
+"""Company default accounts: written, then confirmed by reading the document back."""
 
 from typing import Any
 
 import pytest
 from stolon.erpnext.company import (
+    DefaultNotAppliedError,
     UnknownCompanyFieldError,
-    account_link_fields,
+    clear_defaults_pointing_at,
     set_default_accounts,
 )
 
-META = {
-    "fields": [
-        {"fieldname": "default_bank_account", "fieldtype": "Link", "options": "Account"},
-        {"fieldname": "default_expense_account", "fieldtype": "Link", "options": "Account"},
-        {"fieldname": "default_payable_account", "fieldtype": "Link", "options": "Account"},
-        {"fieldname": "country", "fieldtype": "Link", "options": "Country"},
-        {"fieldname": "abbr", "fieldtype": "Data"},
-    ]
-}
-
 
 class FakeClient:
-    def __init__(self) -> None:
+    """`update` only records; `get` always answers `read_back`, independent of
+    what was sent to `update` -- letting a test state exactly what the server
+    is pretending the write produced, including a silently-dropped field or
+    a value Frappe refused to store.
+    """
+
+    def __init__(self, read_back: dict[str, Any]) -> None:
+        self.read_back = read_back
         self.updates: list[tuple[str, dict[str, Any]]] = []
 
-    def get(self, doctype: str, name: str) -> Any:
-        return META
-
     def update(self, doctype: str, name: str, doc: dict[str, Any]) -> Any:
-        self.updates.append((name, doc))
+        self.updates.append((name, dict(doc)))
         return {"name": name}
 
-
-def test_only_account_links_are_offered() -> None:
-    assert account_link_fields(FakeClient()) == {
-        "default_bank_account",
-        "default_expense_account",
-        "default_payable_account",
-    }
+    def get(self, doctype: str, name: str) -> Any:
+        return self.read_back
 
 
-def test_defaults_are_written_in_one_update() -> None:
-    client = FakeClient()
+def test_a_field_that_lands_is_returned() -> None:
+    client = FakeClient({"default_bank_account": "1111 - Primary Checking Account - AB"})
     written = set_default_accounts(
-        client,
-        "Acmebike Cycling",
-        {"default_bank_account": "1111 - Primary Checking Account - AB"},
-        known=frozenset({"default_bank_account"}),
+        client, "Acmebike Cycling", {"default_bank_account": "1111 - Primary Checking Account - AB"}
     )
-    assert client.updates == [("Acmebike Cycling", {"default_bank_account": "1111 - Primary Checking Account - AB"})]
     assert written == ["default_bank_account"]
 
 
-def test_a_field_this_build_does_not_have_is_refused() -> None:
-    # Measured: this ERPNext build has no default_payroll_payable_account. A
-    # silent no-op would leave the operator believing it was set.
-    client = FakeClient()
+def test_the_update_body_is_exactly_the_defaults_dict() -> None:
+    client = FakeClient({"default_bank_account": "1111 - Primary Checking Account - AB"})
+    set_default_accounts(client, "Acmebike Cycling", {"default_bank_account": "1111 - Primary Checking Account - AB"})
+    assert client.updates == [("Acmebike Cycling", {"default_bank_account": "1111 - Primary Checking Account - AB"})]
+
+
+def test_empty_defaults_makes_no_update_call() -> None:
+    client = FakeClient({})
+    assert set_default_accounts(client, "Acmebike Cycling", {}) == []
+    assert client.updates == []
+
+
+def test_a_field_absent_from_the_read_back_document_is_refused() -> None:
+    # Frappe silently drops an update key that names no real field on the
+    # doctype -- the write succeeds and changes nothing, so absence on
+    # read-back is exactly, and the only way, a misspelled field shows up.
+    client = FakeClient({})
     with pytest.raises(UnknownCompanyFieldError, match="default_payroll_payable_account"):
+        set_default_accounts(client, "Acmebike Cycling", {"default_payroll_payable_account": "2131 - Payroll - AB"})
+    assert client.updates == [("Acmebike Cycling", {"default_payroll_payable_account": "2131 - Payroll - AB"})]
+
+
+def test_a_field_that_reads_back_differently_is_refused() -> None:
+    client = FakeClient({"default_bank_account": "SOMETHING ELSE - AB"})
+    with pytest.raises(DefaultNotAppliedError) as exc_info:
         set_default_accounts(
-            client,
-            "Acmebike Cycling",
-            {"default_payroll_payable_account": "2131 - Payroll - AB"},
-            known=frozenset({"default_bank_account"}),
+            client, "Acmebike Cycling", {"default_bank_account": "1111 - Primary Checking Account - AB"}
         )
+    message = str(exc_info.value)
+    assert "default_bank_account" in message
+    assert "1111 - Primary Checking Account - AB" in message
+    assert "SOMETHING ELSE - AB" in message
+
+
+# --- clear_defaults_pointing_at -------------------------------------------------------
+
+
+def test_clear_defaults_finds_and_clears_exactly_the_matching_fields() -> None:
+    client = FakeClient({
+        "name": "Transpire",
+        "default_cash_account": "1110 - Cash - T",
+        "depreciation_expense_account": "5203 - Depreciation Expense - T",
+        "country": "United States",
+    })
+    cleared = clear_defaults_pointing_at(
+        client, "Transpire", frozenset({"1110 - Cash - T", "5203 - Depreciation Expense - T"})
+    )
+    assert cleared == ["default_cash_account", "depreciation_expense_account"]
+    assert client.updates == [("Transpire", {"default_cash_account": None, "depreciation_expense_account": None})]
+
+
+def test_clear_defaults_leaves_non_matching_values_untouched() -> None:
+    client = FakeClient({"name": "Transpire", "default_cash_account": "1110 - Cash - T", "country": "United States"})
+    cleared = clear_defaults_pointing_at(client, "Transpire", frozenset({"1110 - Cash - T"}))
+    assert cleared == ["default_cash_account"]
+    # Only the matching field is in the update body -- "country" is real,
+    # but its value never matched an account name being retired.
+    assert client.updates == [("Transpire", {"default_cash_account": None})]
+
+
+def test_clear_defaults_makes_no_update_call_when_nothing_matches() -> None:
+    client = FakeClient({"name": "Transpire", "default_cash_account": "1110 - Cash - T", "country": "United States"})
+    cleared = clear_defaults_pointing_at(client, "Transpire", frozenset({"9999 - Retiring - T"}))
+    assert cleared == []
     assert client.updates == []
 
 
-def test_nothing_to_set_makes_no_request() -> None:
-    client = FakeClient()
-    assert set_default_accounts(client, "Acmebike Cycling", {}, known=frozenset()) == []
-    assert client.updates == []
+def test_clear_defaults_never_clears_the_name_field() -> None:
+    # A pathological case: Company's own document name happens to equal one
+    # of the retiring account names. `name` must never be nulled regardless.
+    client = FakeClient({"name": "1110 - Cash - T", "default_cash_account": "1110 - Cash - T"})
+    cleared = clear_defaults_pointing_at(client, "1110 - Cash - T", frozenset({"1110 - Cash - T"}))
+    assert cleared == ["default_cash_account"]
+    assert "name" not in cleared
+    assert client.updates == [("1110 - Cash - T", {"default_cash_account": None})]
 
 
-def test_multiple_defaults_written_in_one_update() -> None:
+def test_clear_defaults_skips_underscore_prefixed_metadata_fields() -> None:
+    client = FakeClient({"_liked_by": "1110 - Cash - T", "default_cash_account": "1110 - Cash - T"})
+    cleared = clear_defaults_pointing_at(client, "Transpire", frozenset({"1110 - Cash - T"}))
+    assert cleared == ["default_cash_account"]
+
+
+def test_multiple_fields_all_land_in_one_update() -> None:
     # The real caller writes eleven Company defaults in a single call.
-    # Verify the one-update guarantee across multiple fields.
-    client = FakeClient()
+    client = FakeClient({
+        "default_bank_account": "1111 - Primary Checking Account - AB",
+        "default_expense_account": "5000 - Cost of Goods Sold - AB",
+        "default_payable_account": "2000 - Accounts Payable - AB",
+    })
     written = set_default_accounts(
         client,
         "Acmebike Cycling",
@@ -84,24 +136,8 @@ def test_multiple_defaults_written_in_one_update() -> None:
             "default_expense_account": "5000 - Cost of Goods Sold - AB",
             "default_payable_account": "2000 - Accounts Payable - AB",
         },
-        known=frozenset({
-            "default_bank_account",
-            "default_expense_account",
-            "default_payable_account",
-        }),
     )
-    # Exactly one update recorded, not three
     assert len(client.updates) == 1
-    # All three field/value pairs in that single update
-    assert client.updates[0] == (
-        "Acmebike Cycling",
-        {
-            "default_bank_account": "1111 - Primary Checking Account - AB",
-            "default_expense_account": "5000 - Cost of Goods Sold - AB",
-            "default_payable_account": "2000 - Accounts Payable - AB",
-        },
-    )
-    # All three fields returned, sorted
     assert written == [
         "default_bank_account",
         "default_expense_account",

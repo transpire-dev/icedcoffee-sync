@@ -92,10 +92,15 @@ def plan_prune(
 ) -> PrunePlan:
     """Decide which extras may be deleted, deepest first.
 
-    An extra already disabled is skipped outright -- neither deleted nor
-    refused, because a prior run (or a fallback in `execute_prune`) already
-    retired it, and there is nothing left to decide. Retrying it forever on
-    every subsequent run would be pure noise.
+    An extra already disabled is not skipped: it still holds its account
+    number, and a prior run only reached "disabled" because ERPNext refused
+    the delete at the time, which does not mean it always will -- the
+    account may since have lost the child, or the Company default, that
+    blocked it. It goes through the same checks as any other extra and,
+    absent a real refusal, is put on the delete list to be attempted again.
+    `execute_prune` is what tells a genuine re-refusal apart from a fresh
+    success, and never re-issues a redundant disable for one that stays
+    refused.
 
     Otherwise, an extra is refused rather than deleted when it carries
     ledger entries, when it is a root (ERPNext requires one root per
@@ -140,9 +145,6 @@ def plan_prune(
     refusals: list[PruneRefusal] = []
 
     for account in extras:
-        if account.disabled:
-            continue
-
         if account.document_name in accounts_with_entries:
             refusals.append(
                 PruneRefusal(
@@ -218,10 +220,18 @@ class _Client(Protocol):
 
 @dataclasses.dataclass
 class PruneReport:
-    """What actually happened, for printing back to the operator."""
+    """What actually happened, for printing back to the operator.
+
+    `already_disabled` is distinct from `disabled`: `disabled` is an account
+    this run itself disabled, just now, as a delete fallback. `already_disabled`
+    is an account that came into this run already disabled, whose delete was
+    attempted again and refused again -- unchanged by this run, not a fresh
+    outcome, and not a failure either.
+    """
 
     deleted: list[str] = dataclasses.field(default_factory=list)
     disabled: list[str] = dataclasses.field(default_factory=list)
+    already_disabled: list[str] = dataclasses.field(default_factory=list)
     failed: list[tuple[str, str]] = dataclasses.field(default_factory=list)
 
 
@@ -267,14 +277,24 @@ def execute_prune(client: _Client, plan: PrunePlan) -> PruneReport:
     shape of problem as a refusal, and should not stop the rest from being
     cleared.
 
+    An account that came into this run already disabled is still attempted
+    -- `plan_prune` puts it on the delete list rather than skipping it,
+    since whatever refused it before may no longer apply. If the delete
+    succeeds now, it is reported as `deleted`, same as any other account.
+    If it is refused again, no second disable is attempted (it is already
+    disabled -- issuing that write again would be a no-op) and it is
+    reported under `already_disabled`, not `disabled` and not `failed`: it
+    is exactly where it was before this run, not a fresh outcome.
+
     Args:
         client: Anything that can delete or update an Account document.
         plan: The plan from `plan_prune`. Deletes run in the given order,
             which is deepest first.
 
     Returns:
-        What was deleted, what was disabled instead, and what failed both
-        ways along with the message from the second `FrappeError`.
+        What was deleted, what was disabled instead, what was already
+        disabled and stayed refused, and what failed both ways along with
+        the message from the second `FrappeError`.
 
     Raises:
         FrappeError: A delete or the disable fallback it triggered failed
@@ -287,7 +307,10 @@ def execute_prune(client: _Client, plan: PrunePlan) -> PruneReport:
         try:
             client.delete("Account", name)
         except _DISABLE_ELIGIBLE:
-            _fall_back_to_disable(client, name, report)
+            if change.live.disabled:
+                report.already_disabled.append(name)
+            else:
+                _fall_back_to_disable(client, name, report)
         else:
             report.deleted.append(name)
     return report
