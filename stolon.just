@@ -8,6 +8,10 @@ stolon-check:
 [group('stolon')]
 stolon-check-ci:
     just -f stolon/justfile check-ci
+# Lint + typecheck + deps in one pass, reporting every failure (unlike a recipe list, which stops at the first)
+[group('stolon')]
+stolon-check-static:
+    just -f stolon/justfile check-static
 # Dependency audit
 [group('stolon')]
 stolon-deps:
