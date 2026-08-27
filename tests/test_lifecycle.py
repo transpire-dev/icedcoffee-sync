@@ -60,10 +60,6 @@ def test_submit_calls_frappe_client_submit_when_permitted() -> None:
 
 
 def test_submit_sends_the_whole_document_not_a_doctype_and_name() -> None:
-    # Regression test: frappe.client.submit takes `doc`, the whole document,
-    # unlike frappe.client.cancel which genuinely takes doctype and name.
-    # Nothing previously asserted the request body, so a submit() that
-    # silently sent the wrong shape was never caught.
     bodies: list[Any] = []
 
     def handler(request: httpx2.Request) -> httpx2.Response:
@@ -173,8 +169,6 @@ def test_update_with_docstatus_is_refused_by_default() -> None:
 
 def test_insert_with_docstatus_zero_is_also_refused() -> None:
     # The rule is "don't touch this field", not "don't set it to something
-    # dangerous" -- docstatus: 0 is already the default, but the key's mere
-    # presence in the payload is what's refused.
     sent: list[str] = []
 
     def handler(request: httpx2.Request) -> httpx2.Response:

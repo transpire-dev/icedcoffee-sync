@@ -12,7 +12,6 @@ from stolon.erpnext.accounts import (
 
 def test_numbered_account_name_matches_the_measured_form() -> None:
     # Measured: inserting account_number="9901", account_name="ZZ Probe
-    # Numbered" into company abbr "AB" produced exactly this document name.
     assert document_name("ZZ Probe Numbered", "AB", "9901") == "9901 - ZZ Probe Numbered - AB"
 
 
@@ -23,7 +22,6 @@ def test_unnumbered_account_omits_the_number_and_its_separator() -> None:
 
 def test_empty_number_is_treated_as_no_number() -> None:
     # Frappe returns "" rather than null for an unset account_number, so the
-    # empty string must not produce " - Bank Accounts - AB".
     assert document_name("Bank Accounts", "AB", "") == "Bank Accounts - AB"
 
 
@@ -39,7 +37,6 @@ def test_abbr_is_required() -> None:
 
 def test_deferred_types_are_not_account_types() -> None:
     # Measured: ERPNext rejects both with a ValidationError naming the allowed
-    # set. Deferred accounting is wired through Company fields instead.
     assert "Deferred Expense" not in ACCOUNT_TYPES
     assert "Deferred Revenue" not in ACCOUNT_TYPES
 

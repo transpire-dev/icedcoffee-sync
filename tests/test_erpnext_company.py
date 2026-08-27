@@ -53,11 +53,6 @@ def test_empty_defaults_makes_no_update_call() -> None:
 
 def test_a_field_absent_from_the_document_is_refused_before_any_write() -> None:
     # Frappe silently drops an update key that names no real field on the
-    # doctype rather than rejecting the whole request, so a single update
-    # naming one unknown field alongside real ones would still write the
-    # real ones -- checking existence only after the write would let that
-    # happen before this function raises. Reading first and refusing here
-    # means no update is ever attempted for an unknown field.
     client = FakeClient({})
     with pytest.raises(UnknownCompanyFieldError, match="default_payroll_payable_account"):
         set_default_accounts(client, "Acmebike Cycling", {"default_payroll_payable_account": "2131 - Payroll - AB"})
@@ -66,8 +61,6 @@ def test_a_field_absent_from_the_document_is_refused_before_any_write() -> None:
 
 def test_a_known_field_alongside_an_unknown_one_is_never_written() -> None:
     # The exact partial-update hazard the pre-write check exists to close:
-    # without it, `default_bank_account` here would already be changed by
-    # the time the missing `default_payroll_payable_account` was noticed.
     client = FakeClient({"default_bank_account": "1111 - Primary Checking Account - AB"})
     with pytest.raises(UnknownCompanyFieldError, match="default_payroll_payable_account"):
         set_default_accounts(
@@ -115,7 +108,6 @@ def test_clear_defaults_leaves_non_matching_values_untouched() -> None:
     cleared = clear_defaults_pointing_at(client, "Transpire", frozenset({"1110 - Cash - T"}))
     assert cleared == ["default_cash_account"]
     # Only the matching field is in the update body -- "country" is real,
-    # but its value never matched an account name being retired.
     assert client.updates == [("Transpire", {"default_cash_account": None})]
 
 
@@ -128,7 +120,6 @@ def test_clear_defaults_makes_no_update_call_when_nothing_matches() -> None:
 
 def test_clear_defaults_never_clears_the_name_field() -> None:
     # A pathological case: Company's own document name happens to equal one
-    # of the retiring account names. `name` must never be nulled regardless.
     client = FakeClient({"name": "1110 - Cash - T", "default_cash_account": "1110 - Cash - T"})
     cleared = clear_defaults_pointing_at(client, "1110 - Cash - T", frozenset({"1110 - Cash - T"}))
     assert cleared == ["default_cash_account"]
@@ -143,11 +134,6 @@ def test_clear_defaults_skips_underscore_prefixed_metadata_fields() -> None:
 
 
 def test_clear_defaults_never_clears_a_field_not_plausibly_an_account_link() -> None:
-    # Regression: exact-value matching alone would clear any string field
-    # that happens to equal the retiring account's name, even one that
-    # links to a different doctype entirely (default_warehouse -> Warehouse,
-    # not Account). Only fields named like account links -- "account" in
-    # the name, or one of the measured exceptions -- are eligible.
     client = FakeClient({
         "name": "Transpire",
         "default_warehouse": "1110 - Cash - T",
@@ -161,8 +147,6 @@ def test_clear_defaults_never_clears_a_field_not_plausibly_an_account_link() -> 
 
 def test_clear_defaults_clears_the_measured_exceptions_without_the_word_account() -> None:
     # round_off_for_opening, stock_received_but_not_billed, and
-    # asset_received_but_not_billed all link to Account despite not
-    # containing "account" in their fieldname -- measured live 2026-08-25.
     client = FakeClient({
         "name": "Transpire",
         "round_off_for_opening": "5203 - Round Off - T",

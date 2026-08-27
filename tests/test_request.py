@@ -40,7 +40,6 @@ def test_list_omits_absent_options_entirely() -> None:
 
 def test_list_passes_pagination_and_ordering() -> None:
     # v2 spells the offset `start`. `offset` is silently ignored -- it does not
-    # error, it just returns page one again, so a wrong name here loops forever.
     request = list_documents("Account", limit=50, start=100, order_by="name asc")
     assert request.params["limit"] == "50"
     assert request.params["start"] == "100"
@@ -82,7 +81,6 @@ def test_method_calls_use_the_v2_method_surface() -> None:
 
 def test_names_containing_slashes_are_escaped() -> None:
     # ERPNext naming series can contain forward slashes; unescaped they would
-    # read as extra path segments and address the wrong document.
     request = get_document("Sales Order", "SO/2024/00001")
     assert request.path == "/api/v2/document/Sales%20Order/SO%2F2024%2F00001"
 
@@ -101,7 +99,6 @@ def test_requests_are_frozen() -> None:
     "hostile",
     [
         # HTTP drops a fragment, so the server would receive the bare method
-        # while a denylist comparison saw a string that was not a member.
         "frappe.client.submit#suffix",
         "frappe.client.submit?x=1",
         "frappe.client.submit/extra",
@@ -120,7 +117,6 @@ def test_call_method_accepts_a_normal_dotted_path() -> None:
 
 def test_get_document_rejects_an_empty_name() -> None:
     # An empty name is falsy; treating it as absent would silently turn a
-    # single-document request into a list of the entire doctype.
     with pytest.raises(ValueError, match="must not be empty"):
         get_document("Account", "")
 
@@ -137,8 +133,6 @@ def test_update_document_rejects_an_empty_name() -> None:
 
 def test_call_method_rejects_a_trailing_newline() -> None:
     # `$` matches before a trailing newline, so `match()` would accept this
-    # while the denylist's exact comparison rejected it -- a way past the
-    # guard that looks like a valid path.
     with pytest.raises(ValueError, match="dotted method path"):
         call_method("frappe.client.submit\n")
 

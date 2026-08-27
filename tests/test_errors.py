@@ -45,7 +45,6 @@ def test_v2_message_becomes_the_exception_message() -> None:
 
 def test_v2_traceback_is_kept_but_is_not_the_message() -> None:
     # The server sends a full Python traceback. It is useful for debugging and
-    # wrong to show a user, so it must not become the message.
     trace = 'Traceback (most recent call last):\n  File "apps/frappe/app.py"...'
     error = error_from_response(417, _v2("ValidationError", "Name is required", exception=trace))
     assert error.message == "Name is required"
@@ -126,10 +125,6 @@ def test_captured_validation_fixture_maps_to_validation_error() -> None:
 
 def test_nested_set_child_exists_maps_to_child_exists_error() -> None:
     # Measured against a live site: deleting a group Account that still has
-    # children returns exactly this shape -- error_type
-    # "NestedSetChildExistsError" at 417 -- and it is neither a
-    # LinkExistsError nor a ValidationError, so it needs its own class or
-    # stolon.apply.prune's disable fallback silently stops covering it.
     error = error_from_response(
         417, _v2("NestedSetChildExistsError", "Cannot delete 1000 - Assets - AB as it has child nodes")
     )

@@ -26,7 +26,6 @@ def test_an_account_with_ledger_entries_is_refused() -> None:
 
 def test_a_root_is_never_deleted() -> None:
     # ERPNext requires its roots, and the engine matches rather than creates
-    # them -- a root appearing as an extra means something is wrong upstream.
     root = live("Orphan Root - AB", "Orphan Root")
     plan = plan_prune([root], [root], set())
     assert [r.reason for r in plan.refusals] == [PruneReason.IS_ROOT]
@@ -42,9 +41,6 @@ def test_a_whole_extra_subtree_is_deletable_deepest_first() -> None:
 
 def test_a_group_and_both_its_children_delete_children_first() -> None:
     # Measured live: a group whose delete is attempted before its children
-    # have actually been deleted comes back ChildExistsError ("has child
-    # nodes") and falls back to disable, leaving its account number
-    # occupied. Both children -- not just one -- must precede the group.
     root = live("Expenses - AB", "Expenses")
     group = live("Old Group - AB", "Old Group", parent="Expenses - AB", is_group=True)
     child_a = live("Old Leaf A - AB", "Old Leaf A", parent="Old Group - AB")
@@ -58,7 +54,6 @@ def test_a_group_and_both_its_children_delete_children_first() -> None:
 
 def test_a_parent_whose_child_survives_is_refused() -> None:
     # Defensive: tree matching should make this unreachable, so it fires only
-    # when that reasoning is wrong.
     root = live("Expenses - AB", "Expenses")
     group = live("Old Group - AB", "Old Group", parent="Expenses - AB", is_group=True)
     keeper = live("Kept - AB", "Kept", parent="Old Group - AB")
@@ -67,12 +62,6 @@ def test_a_parent_whose_child_survives_is_refused() -> None:
 
 
 def test_a_parent_extra_is_refused_when_its_extra_child_is_refused() -> None:
-    # Regression: checking a child's mere presence in `extras` (rather than
-    # whether it was actually cleared to delete) let a GL-entry-carrying
-    # child refused on its own account still wave its otherwise-clean
-    # parent onto the delete list. ERPNext's own ChildExistsError, not
-    # plan_prune, would have caught the mistake, disabling the parent
-    # despite the child surviving underneath it.
     root = live("Expenses - AB", "Expenses")
     group = live("Old Group - AB", "Old Group", parent="Expenses - AB", is_group=True)
     busy_child = live("Busy Leaf - AB", "Busy Leaf", parent="Old Group - AB")
@@ -95,11 +84,6 @@ def test_a_refused_account_does_not_block_the_others() -> None:
 
 def test_an_already_disabled_extra_is_still_attempted_for_delete() -> None:
     # A disabled extra still holds its account number. Skipping it forever
-    # would leave that number permanently occupied even once nothing else
-    # stands in the way of actually deleting it -- so it goes through the
-    # same checks as any other extra and, absent a real refusal, is
-    # attempted for delete like everything else. `execute_prune` is what
-    # tells a genuine re-refusal apart from a fresh success.
     leaf = live("Cash - AB", "Cash", parent="Expenses - AB", disabled=True)
     plan = plan_prune([leaf], [leaf], set())
     assert [d.live.document_name for d in plan.deletes] == ["Cash - AB"]
@@ -167,7 +151,6 @@ def test_a_delete_refused_with_link_exists_falls_back_to_disable() -> None:
 
 def test_a_delete_refused_with_validation_error_falls_back_to_disable() -> None:
     # A generic business-rule refusal, distinct from both LinkExistsError
-    # and the nested-set-specific ChildExistsError below.
     from stolon.frappe.errors import ValidationError
 
     root = live("Expenses - AB", "Expenses")
@@ -180,16 +163,6 @@ def test_a_delete_refused_with_validation_error_falls_back_to_disable() -> None:
 
 
 def test_a_delete_refused_with_child_exists_falls_back_to_disable() -> None:
-    # The regression this test pins: the real cascade. A child that can only
-    # be disabled (LinkExistsError on its own delete) leaves its parent with
-    # a live child node -- disabled, but still a node -- so the parent's own
-    # delete then fails too, and not with LinkExistsError or ValidationError:
-    # it is ChildExistsError (Frappe's NestedSetChildExistsError). A tuple
-    # missing this class would silently stop falling back for the parent,
-    # exactly what nearly shipped. Built directly from a PrunePlan, deepest
-    # first, rather than via plan_prune: that function works from a
-    # pre-execution snapshot and has no way to see the child's disable
-    # happening mid-run -- this is deliberately execute_prune's own outcome.
     from stolon.frappe.errors import ChildExistsError, LinkExistsError
 
     group = live("Old Group - AB", "Old Group", parent="Expenses - AB", is_group=True)
@@ -208,8 +181,6 @@ def test_a_delete_refused_with_child_exists_falls_back_to_disable() -> None:
 
 
 def test_a_delete_that_succeeds_on_an_already_disabled_extra_is_recorded_as_deleted() -> None:
-    # Retrying a previously-disabled extra can genuinely succeed now --
-    # nothing about "already disabled" means "permanently stuck".
     disabled_leaf = live("Cash - AB", "Cash", parent="Expenses - AB", disabled=True)
     plan = PrunePlan([DeleteAccount(disabled_leaf)], [])
     client = FakeClient()
@@ -221,9 +192,6 @@ def test_a_delete_that_succeeds_on_an_already_disabled_extra_is_recorded_as_dele
 
 def test_a_delete_refused_on_an_already_disabled_extra_is_recorded_as_already_disabled() -> None:
     # The idempotency case this bucket exists for: re-disabling something
-    # already disabled would be a no-op write, and counting it as `failed`
-    # would be dishonest -- it is not stuck, it is exactly where it was
-    # before this run, still occupying its account number.
     from stolon.frappe.errors import LinkExistsError
 
     disabled_leaf = live("Cash - AB", "Cash", parent="Expenses - AB", disabled=True)
@@ -237,10 +205,6 @@ def test_a_delete_refused_on_an_already_disabled_extra_is_recorded_as_already_di
 
 
 def test_a_delete_refused_with_rate_limit_propagates_and_does_not_disable() -> None:
-    # The regression this boundary exists to pin: infrastructure trouble
-    # must not be treated the same as a business refusal. A retry might
-    # clear a rate limit; disabling the account instead would be wrong, and
-    # `except FrappeError` would have done exactly that.
     from stolon.frappe.errors import RateLimitError
 
     root = live("Expenses - AB", "Expenses")
@@ -253,11 +217,6 @@ def test_a_delete_refused_with_rate_limit_propagates_and_does_not_disable() -> N
 
 
 def test_a_disable_refused_with_rate_limit_propagates_and_is_not_recorded_as_failed() -> None:
-    # The disable path's own version of the delete-path regression above:
-    # `except FrappeError` on the disable would turn a 429 into
-    # report.failed, disagreeing with the module docstring's claim that
-    # transient errors propagate. RateLimitError must come out of
-    # execute_prune uncaught here too, not land in report.failed.
     from stolon.frappe.errors import LinkExistsError, RateLimitError
 
     class RateLimitedOnDisable:

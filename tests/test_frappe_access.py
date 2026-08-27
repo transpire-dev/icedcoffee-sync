@@ -106,11 +106,6 @@ def test_ensure_role_can_grant_desk_access() -> None:
 
 
 def test_ensure_role_repairs_desk_access_when_it_differs() -> None:
-    # Regression: an existing role's desk_access used to be ignored entirely
-    # -- reconciled on create only. A role hand-flipped to desk_access=1
-    # since the last run must be repaired back to what the caller requested,
-    # the same way `revoke_grants_except` and `ensure_user`'s role
-    # reconciliation already close drift for permissions and roles.
     client = RecordingClient(docs={("Role", "Transpire Books Bot"): {"name": "Transpire Books Bot", "desk_access": 1}})
     change = ensure_role(client, "Transpire Books Bot", desk_access=False)
     assert change == RoleChange(created=False, desk_access_repaired=True)
@@ -126,7 +121,6 @@ def test_ensure_role_repairs_desk_access_the_other_direction() -> None:
 
 def test_ensure_role_treats_a_missing_desk_access_field_as_falsy() -> None:
     # A role read back with no desk_access key at all (rather than an
-    # explicit 0) must not be misread as "differs from the requested False".
     client = RecordingClient(docs={("Role", "Transpire Books Bot"): {"name": "Transpire Books Bot"}})
     change = ensure_role(client, "Transpire Books Bot")
     assert change == RoleChange(created=False, desk_access_repaired=False)
@@ -134,12 +128,6 @@ def test_ensure_role_treats_a_missing_desk_access_field_as_falsy() -> None:
 
 
 def test_ensure_role_re_enables_a_disabled_role() -> None:
-    # Regression: a role hand-disabled through Frappe's UI silently strips
-    # the bot of everything it was granted, forever -- nothing used to
-    # reconcile `disabled` on an existing role. This bot has no legitimate
-    # reason to have its role disabled by policy, so that state can only be
-    # drift that a re-run must repair, the same as ensure_user's `enabled`
-    # reconciliation already does for the bot user.
     client = RecordingClient(
         docs={("Role", "Transpire Books Bot"): {"name": "Transpire Books Bot", "desk_access": 0, "disabled": 1}}
     )
@@ -159,7 +147,6 @@ def test_ensure_role_is_a_no_op_when_present_enabled_and_desk_access_matches() -
 
 def test_ensure_role_repairs_desk_access_and_disabled_in_the_same_update() -> None:
     # Both repairs must land in one write, not two -- the same way
-    # desk_access and disabled are two fields of one Role document.
     client = RecordingClient(
         docs={("Role", "Transpire Books Bot"): {"name": "Transpire Books Bot", "desk_access": 1, "disabled": 1}}
     )
@@ -189,7 +176,6 @@ def test_grant_writes_all_ptypes_with_explicit_zeros() -> None:
     assert sent_ptypes["write"] == "1"
     assert sent_ptypes["create"] == "1"
     # The point of the function: submit/cancel/amend are explicit zeros, not
-    # left unset for Frappe's own default to decide.
     assert sent_ptypes["submit"] == "0"
     assert sent_ptypes["cancel"] == "0"
     assert sent_ptypes["amend"] == "0"
@@ -199,11 +185,6 @@ def test_grant_writes_all_ptypes_with_explicit_zeros() -> None:
 
 
 def test_grant_always_resets_if_owner_and_select_to_zero() -> None:
-    # Regression: neither flag is a member of PTYPES, so nothing ever asked
-    # `grant` to touch them -- which meant a stale `if_owner=1` (set by some
-    # other process, e.g. a hand edit through Frappe's UI) survived every
-    # re-provision forever, silently narrowing the role to documents the
-    # bot itself created.
     client = RecordingClient()
     grant(client, "Transpire Books Bot", PermissionGrant("Account", frozenset({"read"})))
     update_calls = [c[1] for c in client.calls if c[0] == f"{_PERMISSION_MANAGER}.update"]
@@ -214,7 +195,6 @@ def test_grant_always_resets_if_owner_and_select_to_zero() -> None:
 
 def test_permission_grant_still_rejects_if_owner_and_select() -> None:
     # These are reset unconditionally by `grant`, never something a caller
-    # can turn on -- PermissionGrant's own validation must keep saying so.
     with pytest.raises(ValueError, match="if_owner"):
         PermissionGrant("Account", frozenset({"if_owner"}))
     with pytest.raises(ValueError, match="select"):
@@ -268,11 +248,6 @@ def test_revoke_grants_except_removes_doctypes_outside_keep() -> None:
 
 
 def test_revoke_grants_except_removes_a_nonzero_permlevel_row_on_an_allowed_doctype() -> None:
-    # Regression: `grant` only ever manages permlevel 0, so a stale row at
-    # any other permlevel on an otherwise-allowed doctype used to survive
-    # here forever -- kept just because its doctype was in `keep`, with no
-    # channel ever resetting or revoking it, silently carrying whatever
-    # flags it held outside the declared policy.
     client = _RevokeClient([
         {"parent": "Account", "permlevel": 0},
         {"parent": "Account", "permlevel": 1},
@@ -301,8 +276,6 @@ def test_revoke_grants_except_returns_empty_when_nothing_to_revoke() -> None:
 
 def test_revoke_grants_except_propagates_with_the_doctype_named() -> None:
     # Frappe's own guard against leaving a doctype with zero permission
-    # rules -- if this role is the doctype's only rule, remove cannot
-    # succeed, and that must surface, not be silently skipped.
     client = _RevokeClient(
         [{"parent": "DocType", "permlevel": 0}],
         raise_on_remove={"DocType": ValidationError("There must be atleast one permission rule.")},
@@ -337,7 +310,6 @@ def test_ensure_user_creates_when_missing() -> None:
 
 def test_ensure_user_reconciles_roles_to_exactly_the_requested_set() -> None:
     # A stray hand-added role is a privilege escalation riding along on the
-    # bot's API key -- it must be removed, not merely supplemented.
     client = RecordingClient(
         docs={
             ("User", "books-robot@example.com"): {
@@ -383,12 +355,6 @@ def test_ensure_user_is_a_no_op_when_roles_already_match() -> None:
 
 
 def test_ensure_user_re_enables_a_disabled_existing_user() -> None:
-    # Regression: a disabled bot user was left disabled forever. provision()
-    # would still mint it a fresh secret that could never authenticate,
-    # fail verification, and repeat that on every re-run with no way to
-    # recover short of a human re-enabling the user by hand -- the same
-    # class of drift ensure_role's desk_access repair and
-    # revoke_grants_except's stale-grant reconciliation already close.
     client = RecordingClient(
         docs={
             ("User", "books-robot@example.com"): {
@@ -658,9 +624,6 @@ def _client_that(
 
 def test_probe_lifts_may_submit_because_the_local_guard_would_otherwise_refuse() -> None:
     # Proves the lift in probe_submit is load-bearing: without it, the plain
-    # client's own guard refuses this exact document locally, before any
-    # request reaches the server -- which would prove nothing about server
-    # role permissions, the only thing this probe exists to test.
     with pytest.raises(SubmitNotPermittedError):
         Client(CONFIG).insert(
             "Journal Entry",
@@ -706,7 +669,6 @@ def test_probe_submit_constructs_the_client_with_may_submit_lifted(monkeypatch: 
 
 def test_probe_classifies_a_true_positive_refusal_as_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     # (can_create=True, submit_flag=False, insert raises PermissionError_):
-    # the only combination that actually proves the refusal targets submit.
     def raise_permission_error(doctype: str, doc: dict[str, Any]) -> Any:
         raise PermissionError_("No permission for Journal Entry")
 
@@ -726,9 +688,6 @@ def test_probe_does_not_confuse_a_total_lockout_with_a_submit_scoped_refusal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The false-positive a live run actually hit: (can_create=False,
-    # submit_flag=False, insert raises PermissionError_ with the SAME generic
-    # message a submit-scoped refusal would produce). A credential locked out
-    # of drafting entirely must not read as "correctly scoped to no-submit".
     def raise_permission_error(doctype: str, doc: dict[str, Any]) -> Any:
         raise PermissionError_(
             "User books-robot@example.com does not have doctype access via role permission for document Journal Entry"
@@ -737,8 +696,6 @@ def test_probe_does_not_confuse_a_total_lockout_with_a_submit_scoped_refusal(
     monkeypatch.setattr(
         "stolon.frappe.access.Client",
         # A total lockout means the draft insert `_probe_create` makes is
-        # refused too, not just the submit-flagged one -- unlike the
-        # default fake, which assumes the draft succeeds.
         _client_that(
             raise_permission_error, can_create=False, submit_flag=False, draft_behavior=raise_permission_error
         ),
@@ -754,12 +711,6 @@ def test_probe_does_not_trust_a_doctype_level_create_yes_over_a_document_level_n
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The gap `has_permission` alone cannot see: it is a doctype-level
-    # question (docname=""), so it cannot detect a document- or
-    # Company-scoped restriction -- a User Permission narrowing which
-    # Company values this credential may create against, for instance.
-    # Here `has_permission` says create=True, but the real draft insert
-    # against this specific company is refused; the submit attempt must
-    # never even run, since nothing it says could be trusted anyway.
     def raise_permission_error(doctype: str, doc: dict[str, Any]) -> Any:
         raise PermissionError_("User books-robot@example.com does not have doctype access via role permission")
 
@@ -779,9 +730,6 @@ def test_probe_does_not_trust_a_doctype_level_create_yes_over_a_document_level_n
 
 def test_probe_deletes_the_draft_once_create_access_is_confirmed(monkeypatch: pytest.MonkeyPatch) -> None:
     # `_probe_create`'s draft is real evidence, not a dry run -- Frappe has
-    # no dry-run insert -- so a draft that actually posts must be cleaned
-    # up immediately rather than left behind as debris from a permission
-    # check.
     def raise_permission_error(doctype: str, doc: dict[str, Any]) -> Any:
         raise PermissionError_("no permission")
 
@@ -800,13 +748,6 @@ def test_probe_deletes_the_draft_once_create_access_is_confirmed(monkeypatch: py
 def test_probe_create_raises_a_labeled_error_when_cleanup_cannot_delete_the_draft(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Regression: the credential being probed is exactly the one a delete
-    # failure here is most likely to come from -- a bot minted by
-    # books.access.provision is deliberately never granted delete on the
-    # probe doctype. An unlabeled PermissionError propagating from the
-    # cleanup delete reads as "the probe itself failed", burying the more
-    # urgent fact that a real document now exists on the live site.
-    # OrphanProbeDocumentError exists so the caller can tell the two apart.
     def raise_permission_error(doctype: str, doc: dict[str, Any]) -> Any:
         raise PermissionError_("no permission")
 
@@ -829,8 +770,6 @@ def test_probe_create_raises_a_labeled_error_when_cleanup_cannot_delete_the_draf
 
 def test_probe_create_confirms_access_on_validation_error(monkeypatch: pytest.MonkeyPatch) -> None:
     # The expected way a draft insert proves create access without
-    # actually creating anything: it reaches validation and stops there
-    # for want of the mandatory `accounts` rows.
     def raise_validation_error(doctype: str, doc: dict[str, Any]) -> Any:
         raise ValidationError("Accounts is mandatory")
 
@@ -843,20 +782,12 @@ def test_probe_create_confirms_access_on_validation_error(monkeypatch: pytest.Mo
     )
     probe = probe_submit(CONFIG, company="Acmebike Cycling")
     # can_create is True (the draft's ValidationError confirmed it), and
-    # the submit-flagged attempt still ran and raised, so refused reduces
-    # to whatever submit_flag says.
     assert probe.can_create is True
 
 
 def test_probe_create_propagates_a_rate_limit_rather_than_confirming_access(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Regression: `except FrappeError` on the draft insert would treat a
-    # 429 the same as the expected ValidationError, letting the
-    # submit-flagged attempt run and its result get trusted even though
-    # create access was never actually proven. A RateLimitError answers
-    # nothing about permissions and must propagate, the same as a failed
-    # has_permission call already does.
     from stolon.frappe.errors import RateLimitError
 
     def raise_rate_limit(doctype: str, doc: dict[str, Any]) -> Any:
@@ -875,9 +806,6 @@ def test_probe_create_propagates_a_rate_limit_rather_than_confirming_access(
 
 def test_probe_classifies_a_validation_stop_as_not_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     # (can_create=True, submit_flag=True, insert raises ValidationError):
-    # permission passed and reached validation, which stopped it -- this
-    # proves nothing about the role's submit permission either way, so it is
-    # not classified as "refused".
     def raise_validation_error(doctype: str, doc: dict[str, Any]) -> Any:
         raise ValidationError("Accounts is mandatory")
 
@@ -895,8 +823,6 @@ def test_probe_classifies_a_validation_stop_as_not_refused(monkeypatch: pytest.M
 
 def test_probe_classifies_an_unexpected_success_as_not_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     # (can_create=True, submit_flag=False, insert succeeds): the catastrophic
-    # case -- permission passed and the document actually posted despite
-    # missing `accounts`.
     def succeed(doctype: str, doc: dict[str, Any]) -> Any:
         return {"name": "ACC-JV-2026-00001"}
 
@@ -911,8 +837,6 @@ def test_probe_classifies_an_unexpected_success_as_not_refused(monkeypatch: pyte
 
 def test_probe_propagates_a_failed_has_permission_call(monkeypatch: pytest.MonkeyPatch) -> None:
     # The probe's own permission check failing is not an answer about
-    # permissions -- it means the probe could not run at all, like a
-    # transport error, so it must propagate rather than becoming a SubmitProbe.
     def unreachable(doctype: str, doc: dict[str, Any]) -> Any:
         raise AssertionError("insert must not run when has_permission itself failed")
 
@@ -926,9 +850,6 @@ def test_probe_propagates_a_failed_has_permission_call(monkeypatch: pytest.Monke
 
 def test_probe_asks_has_permission_for_submit_with_no_docname(monkeypatch: pytest.MonkeyPatch) -> None:
     # No equivalent "create" ask: has_permission is doctype-level and
-    # cannot see a document- or Company-scoped restriction, so
-    # `_probe_create`'s real draft attempt is what answers that question
-    # instead -- see its own tests.
     calls: list[dict[str, Any]] = []
 
     def raise_permission_error(doctype: str, doc: dict[str, Any]) -> Any:

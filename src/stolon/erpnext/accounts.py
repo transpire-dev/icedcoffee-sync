@@ -119,16 +119,11 @@ def company_abbr(client: _Reader, company: str) -> str:
 def read_chart(client: _Reader, company: str) -> list[LiveAccount]:
     """Every account on the site for one company.
 
-    Frappe returns "" rather than null for unset links and selects, so both are
-    normalised to None here. Leaving "" in place would make an unparented root
-    look like a child of an account named "".
-
-    Paged through `iter_all` rather than a single capped `list` call: a
-    server-side page cap can return fewer rows than were asked for while
-    still reporting more pages remain, and a single-shot read has no way to
-    notice that short of the cap coincidentally matching the true count. A
-    silently truncated read makes every account past the cutoff look absent
-    from the site, which gets it created again as a duplicate.
+    Frappe returns "" rather than null for unset links and selects, normalised
+    to None here -- leaving "" in place would make an unparented root look
+    like a child of an account named "". Paged through `iter_all`, not a
+    single capped `list` call: a silently truncated read would make every
+    account past the cutoff look absent and get it created again as a duplicate.
     """
     rows = client.iter_all(
         "Account",
@@ -154,20 +149,13 @@ def read_chart(client: _Reader, company: str) -> list[LiveAccount]:
 def accounts_with_entries(client: _Reader, document_names: list[str]) -> set[str]:
     """Which of these accounts already carry ledger entries.
 
-    One `limit=1` presence probe per account, rather than a single batched
-    `IN` query. What the caller needs is presence per account -- and a
-    batched query has no way to give that: `list_documents` supports only
-    fields, filters, limit, start and order_by, with no grouping or distinct
-    clause to make "these accounts have zero entries" derivable from a capped
-    page of rows. A shared `limit` over an `IN` filter caps total ROWS, not
-    accounts -- one account with heavy history fills the whole page and
-    starves the presence signal for every other name in the batch, reporting
-    them as entry-free when they are not. That would let the caller modify
-    accounts that carry real ledger history, which is exactly what this guard
-    exists to prevent.
-
-    The honest cost of that correctness: one request per account. This runs
-    as part of a tool a human runs and reads, not a hot path.
+    One `limit=1` presence probe per account, not a single batched `IN`
+    query: a shared `limit` over an `IN` filter caps total ROWS, not
+    accounts, so one account with heavy history could starve the presence
+    signal for every other name in the batch and report them as entry-free
+    when they are not -- exactly what this guard exists to prevent. The
+    honest cost: one request per account, acceptable for a tool a human
+    runs and reads, not a hot path.
     """
     found: set[str] = set()
     for name in document_names:

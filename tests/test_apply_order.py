@@ -72,8 +72,6 @@ def _order(renumbers):
 
 def test_the_live_current_assets_cash_in_hand_pair_orders_cash_in_hand_first() -> None:
     # Measured on the live site: apply died renumbering "Current Assets" to
-    # 1100 before "Cash In Hand" -- the account already sitting at 1100 --
-    # had let go of it.
     current_assets = renumber(
         live("1100-1600 - Current Assets - T", "1100-1600", "Current Assets"),
         desired("1100", "Current Assets"),
@@ -106,8 +104,6 @@ def test_independent_renumbers_keep_plan_order() -> None:
 
 def test_a_two_cycle_is_broken_with_a_park_step() -> None:
     # A wants B's number and B wants A's -- neither can go first. Parking A
-    # onto a temporary number frees 10 for B, then A's real renumber (to 20)
-    # runs once B has vacated it.
     a = renumber(live("A - T", "10", "A"), desired("20", "A"))
     b = renumber(live("B - T", "20", "B"), desired("10", "B"))
     ordered = _order([a, b])
@@ -120,12 +116,6 @@ def test_a_two_cycle_is_broken_with_a_park_step() -> None:
 
 
 def test_park_avoids_a_number_an_untouched_live_account_already_holds() -> None:
-    # Regression: the old avoid-set was built only from the renumbers in
-    # this same plan, so a park candidate could collide with an account
-    # this plan never touches at all -- an unrelated live account already
-    # sitting on "910" made the park request (and the whole apply) fail on
-    # a real site. `taken` here stands in for "every number the live site
-    # currently has", independent of what these two renumbers mention.
     a = renumber(live("A - T", "10", "A"), desired("20", "A"))
     b = renumber(live("B - T", "20", "B"), desired("10", "B"))
     ordered = order_renumbers([a, b], frozenset({"10", "20"}), frozenset({"10", "20", "910"}))
@@ -135,7 +125,6 @@ def test_park_avoids_a_number_an_untouched_live_account_already_holds() -> None:
 
 def test_a_name_only_change_does_not_depend_on_itself() -> None:
     # If this created a self-dependency, it would never become "ready" on
-    # its own and would be mistaken for a cycle -- parked for no reason.
     rename_only = renumber(live("Old Name - T", "10", "Old Name"), desired("10", "New Name"))
     other = renumber(live("Other - T", "20", "Other"), desired("21", "Other"))
     ordered = _order([rename_only, other])

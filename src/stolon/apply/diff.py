@@ -1,38 +1,14 @@
 """Compare a desired chart against a live one and say what would change.
 
-Matching is a top-down walk of both trees, one matched pair at a time. An
-account has no usable intrinsic key, so identity comes from position: which
-root it hangs under, then its account name among that parent's actual
-children.
+Accounts have no intrinsic key: identity comes from position, walked
+top-down. A root is matched by root_type, since ERPNext rejects an Account
+with no `parent_account` and so roots are never created. A child is matched
+against its parent's already-resolved *live* identity, not a pre-apply
+index, so a renamed parent's children still match.
 
-Roots are matched by root_type. A company has exactly one root per root_type
-and so does the chart, so for a root the root_type *is* the identity. Matching
-roots by name instead would fail on every site ERPNext set up itself -- its
-stock roots are named "Application of Funds (Assets)", "Source of Funds
-(Liabilities)" and "Income" -- and the unmatched chart roots would become
-creates, which ERPNext rejects outright: inserting an Account with no
-`parent_account` is a MandatoryError. Roots are therefore never created.
-
-Matching a child against its parent's *resolved* live identity is what makes a
-renamed parent safe. An index built from the pre-apply state keys a live child
-off its parent's old name, so the chart's identical child under the new name
-matches nothing: the live subtree is reported as extras, the desired subtree as
-creates, and applying that duplicates the whole branch. Worse, the second run
-then matches cleanly and reports no changes -- an idempotency check passes over
-an already-wrong chart.
-
-The output separates three kinds of outcome deliberately:
-
-- changes we will make (creates, renumbers, retypes),
-- accounts on the site that the chart does not describe (extras), which are
-  reported and left alone -- deletion is opt-in, never a consequence of a
-  file not mentioning something,
-- refusals, which are situations where more than one answer is defensible and
-  guessing would touch a ledger.
-
-A single refusal makes the whole plan unapplyable. That is the point of
-plan-and-approve: a partially applied chart is worse than an unapplied one,
-because the next run diffs against a state nobody chose.
+Extras (accounts the chart doesn't describe) are reported and left alone --
+deletion is opt-in. A single refusal makes the whole plan unapplyable, since
+a partially applied chart leaves a tree shape nobody chose to diff against.
 """
 
 from __future__ import annotations
@@ -87,17 +63,12 @@ class ExtraAccount:
 
 @dataclasses.dataclass(frozen=True)
 class EnableAccount:
-    """A matched account the chart wants working, but the site has disabled.
+    """A matched account the chart wants enabled, but the site has disabled.
 
-    `DesiredAccount` has no `disabled` field -- the chart format has no way
-    to describe a disabled account at all -- so any live account this diff
-    matches is something the chart wants enabled, unconditionally. Seeing
-    `disabled=True` on a match is therefore always drift, never an intended
-    state, and correcting it is as unambiguous as a rename or a retype:
-    flip the field back. Unlike those two, this never touches GL entries or
-    the document's identity, so it is never checked against
-    `with_entries` -- a disabled account carrying real history is exactly
-    the account most worth re-enabling, not less.
+    The chart format has no field for "disabled", so any matched account is
+    implicitly wanted enabled -- `disabled=True` is always drift. Never
+    checked against `with_entries`: re-enabling touches neither GL entries
+    nor the document's identity.
     """
 
     live: LiveAccount
@@ -109,9 +80,8 @@ class Refusal:
     """A situation the diff will not resolve on its own.
 
     `live_document_names` holds the live accounts the refusal is about -- one
-    for a mismatch, several for an ambiguous match, none when the site has no
-    account where the chart needs one. It is the only handle a caller has on
-    those documents: there is no key index to look them up in.
+    for a mismatch, several for an ambiguous match, none when the chart wants
+    an account the site doesn't have.
     """
 
     key: MatchKey
@@ -124,9 +94,8 @@ class Refusal:
 class ChartPlan:
     """Everything the diff concluded.
 
-    `enables` defaults to empty and sits last so every existing positional
-    `ChartPlan(...)` construction -- test fixtures especially -- keeps
-    working unchanged; it is not less important than the fields before it.
+    `enables` defaults to empty and sits last so positional `ChartPlan(...)`
+    construction (test fixtures, especially) needs no updating.
     """
 
     creates: list[CreateAccount]
@@ -154,24 +123,19 @@ def diff(
 ) -> ChartPlan:
     """Diff a desired chart against a live one.
 
-    `accounts_with_entries` holds live document names carrying GL entries. Only
-    accounts we would otherwise *change* are checked against it -- an account
-    with history that already matches the chart is fine, and refusing it would
-    make every subsequent run unapplyable forever.
-
     Args:
         desired: The chart as the file describes it.
         live: Every account the site has for the company.
         accounts_with_entries: Live document names carrying ledger entries.
+            Only accounts this diff would otherwise *change* are checked
+            against it.
 
     Returns:
         Everything the walk concluded, refusals included.
 
     Raises:
-        KeyError: A desired account names a parent outside the chart, or a live
-            account names a parent outside `live`.
-        ValueError: The chart declares two roots of the same root_type, which
-            leaves the root match with no way to tell them apart.
+        KeyError: A desired or live account names a parent outside its set.
+        ValueError: The chart declares two roots of the same root_type.
     """
     walk = _Walk(
         with_entries=accounts_with_entries,
@@ -235,10 +199,9 @@ class _Walk:
     def pair(self, want: DesiredAccount, have: LiveAccount) -> None:
         """Reconcile one matched pair, then match their children.
 
-        The children are walked even when the pair itself was refused: the two
-        accounts are the same account either way, so their subtrees are worth
-        reporting. Nothing runs from a refused plan, so a create proposed under
-        a disputed parent is information, not a hazard.
+        Children are walked even for a refused pair: nothing runs from a
+        refused plan, so a create proposed under a disputed parent is just
+        information.
         """
         self.matched.add(have.document_name)
         self.reconcile(want, have)
@@ -286,11 +249,9 @@ class _Walk:
     def children(self, want: DesiredAccount, have: LiveAccount) -> None:
         """Match a matched pair's children to each other by account name.
 
-        Only this pair's own children are candidates, which is what keeps a
-        renamed parent from stranding its subtree. Ambiguity is therefore
-        between siblings rather than chart-wide: two children of one parent
-        sharing a name are indistinguishable, two accounts of the same name
-        under different parents are not.
+        Only this pair's own children are candidates -- keeps a renamed
+        parent from stranding its subtree, and makes ambiguity a
+        sibling-only concern rather than a chart-wide one.
         """
         available: dict[str, list[LiveAccount]] = {}
         for child in self.live_children.get(have.document_name, []):
@@ -315,32 +276,16 @@ class _Walk:
     def number_collisions(self, live: list[LiveAccount]) -> None:
         """Refuse any create or renumber that would land on a number a live account still holds.
 
-        ERPNext enforces a unique account_number per company, so an insert or
-        rename that assigns a number another live account currently carries
-        fails outright -- and unlike `reconcile`'s checks, this one is not
-        local to a matched pair: the account holding the contested number can
-        be anywhere in the tree, matched or not.
-
-        The number is checked against the state *after* this plan's own
-        renumbers land, not the state on the site today, because
-        `apply_chart` runs every renumber before any create. A live account
-        this same plan is moving off of the contested number will not hold it
-        any more by the time a create or another renumber would claim it, so
-        that combination is not a collision -- only a number nothing in this
-        plan vacates can still be occupied when the create runs. Refusing the
-        vacated case would make an ordinary renumbering plan permanently
-        unapplyable, since the same collision would be reported and refused
-        on every subsequent run forever.
-
-        A number an account already holds is never a collision with that same
-        account: `check` compares document names, so a renumber that keeps its
-        own number (only the name is changing) is never reported as clashing
-        with itself.
+        Not local to a matched pair, unlike `reconcile`'s checks: the
+        contested account can be anywhere in the tree. Checked against the
+        state *after* this plan's own renumbers land -- `apply_chart` runs
+        renumbers before creates, so a number this plan itself vacates is
+        not a collision, or a valid renumbering plan would refuse itself
+        forever.
 
         Args:
-            live: Every account the site has for the company, the same list
-                `diff` was given -- the contested account may be one this walk
-                never matched or visited.
+            live: Every account the site has for the company -- the
+                contested account may be one this walk never visited.
         """
         live_by_number = {a.number: a for a in live if a.number}
         vacated = {r.live.number for r in self.renumbers if r.live.number and r.live.number != r.desired.number}
@@ -426,11 +371,9 @@ def _desired_children(desired: list[DesiredAccount]) -> dict[str | None, list[De
 def _live_children(live: list[LiveAccount]) -> dict[str | None, list[LiveAccount]]:
     """Group live accounts under their parent's document name; roots under None.
 
-    A parent naming a document outside the given set is an error rather than a
-    second root: the walk descends from the roots, so an account hanging off a
-    missing parent would never be visited and would be reported as an extra --
-    which reads as "the chart does not describe this" when the truth is "we
-    never looked at it".
+    Raises `KeyError` if a parent names a document outside the given set:
+    the walk descends only from roots, so such an account would otherwise be
+    silently misreported as an extra rather than one nobody looked at.
     """
     by_document_name = {a.document_name: a for a in live}
     children: dict[str | None, list[LiveAccount]] = {}

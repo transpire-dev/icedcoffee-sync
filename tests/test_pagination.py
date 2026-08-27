@@ -54,7 +54,6 @@ async def test_async_iter_all_walks_every_page() -> None:
 
 def test_iter_all_stops_when_the_server_says_so_even_on_a_full_page() -> None:
     # The short-page heuristic would keep going here: the page is exactly
-    # full. has_next_page: false must override it.
     def handler(request: httpx2.Request) -> httpx2.Response:
         rows = [{"name": f"ACC-{i}"} for i in range(100)]
         return httpx2.Response(200, json={"has_next_page": False, "data": rows})
@@ -66,7 +65,6 @@ def test_iter_all_stops_when_the_server_says_so_even_on_a_full_page() -> None:
 
 def test_iter_all_keeps_paging_when_the_server_says_so_on_a_short_page() -> None:
     # The short-page heuristic would stop here: the page is short.
-    # has_next_page: true must override it.
     pages = [
         {"has_next_page": True, "data": [{"name": "ACC-0"}]},
         {"has_next_page": False, "data": [{"name": "ACC-1"}]},
@@ -84,10 +82,6 @@ def test_iter_all_keeps_paging_when_the_server_says_so_on_a_short_page() -> None
 
 def test_iter_all_advances_by_rows_returned_not_page_size_on_a_capped_page() -> None:
     # A server that caps page size below what was asked for can return fewer
-    # rows than page_size while still reporting has_next_page: true. Rows are
-    # keyed by `start` here, so advancing by `page_size` (skipping ahead of
-    # what the server actually sent) produces a detectable gap rather than
-    # coincidentally passing.
     total = 25
     served_page_size = 10  # server caps below the requested page_size of 100
 
@@ -119,7 +113,6 @@ async def test_async_iter_all_advances_by_rows_returned_not_page_size_on_a_cappe
 
 async def test_async_iter_all_stops_when_the_server_says_so_even_on_a_full_page() -> None:
     # Async twin of the sync case above: both clients implement has_next_page
-    # handling independently, so both need the regression coverage.
     def handler(request: httpx2.Request) -> httpx2.Response:
         rows = [{"name": f"ACC-{i}"} for i in range(100)]
         return httpx2.Response(200, json={"has_next_page": False, "data": rows})
@@ -132,8 +125,6 @@ async def test_async_iter_all_stops_when_the_server_says_so_even_on_a_full_page(
 @pytest.mark.parametrize("reserved", ["limit", "start"])
 def test_iter_all_rejects_pagination_kwargs_it_controls(reserved: str) -> None:
     # Forwarding a caller's `limit`/`start` alongside the pager's own produced
-    # a duplicate-keyword TypeError from inside the loop, which said nothing
-    # useful. Refuse it up front with the knob they actually wanted.
     def handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(200, json={"data": []})
 
@@ -156,8 +147,6 @@ async def test_async_iter_all_rejects_pagination_kwargs_it_controls() -> None:
 @pytest.mark.parametrize("bad", [0, -1])
 def test_iter_all_rejects_a_page_size_that_cannot_page(bad: int) -> None:
     # A zero or negative size asks for nothing, the empty result ends the loop
-    # on its first pass, and iter_all returns silently having fetched no
-    # documents -- indistinguishable from an empty doctype.
     def handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(200, json={"data": []})
 

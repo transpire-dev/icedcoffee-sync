@@ -49,7 +49,6 @@ def test_absent_account_is_created() -> None:
 
 def test_unnumbered_live_account_is_renumbered_not_recreated() -> None:
     # The stock chart carries no numbers at all, so matching on number would
-    # match nothing and every account would be created as a duplicate.
     plan = diff(
         chart(desired("5202", "Bank Charges")),
         site(live("Bank Charges - AB", "Bank Charges")),
@@ -70,10 +69,6 @@ def test_matching_number_and_type_produces_no_change() -> None:
 
 
 def test_a_disabled_match_is_reported_for_enabling() -> None:
-    # Regression: `DesiredAccount` has no `disabled` field at all, so a
-    # disabled match used to produce an empty plan -- coa apply could
-    # report success while the chart's account stayed unusable, or a
-    # Company default ended up pointing at it.
     plan = diff(
         chart(desired("5202", "Bank Charges")),
         site(live("5202 - Bank Charges - AB", "Bank Charges", number="5202", disabled=True)),
@@ -106,9 +101,6 @@ def test_a_disabled_match_that_also_needs_a_retype_reports_both() -> None:
 
 def test_a_disabled_account_carrying_ledger_entries_is_still_enabled() -> None:
     # Enabling never touches GL entries or the document's identity, unlike
-    # a rename or retype, so it is never checked against with_entries -- a
-    # disabled account with real history is exactly the one most worth
-    # re-enabling, not less.
     plan = diff(
         chart(desired("5202", "Bank Charges")),
         site(live("5202 - Bank Charges - AB", "Bank Charges", number="5202", disabled=True)),
@@ -170,7 +162,6 @@ def test_two_live_siblings_sharing_a_name_are_refused() -> None:
 
 def test_same_name_under_different_parents_is_not_ambiguity() -> None:
     # Real case: the chart has a group "Accounts Payable" with a leaf of the
-    # same name inside it. Ambiguity is between siblings, not chart-wide.
     plan = diff(
         chart(
             desired("2110", "Accounts Payable", is_group=True),
@@ -190,8 +181,6 @@ def test_same_name_under_different_parents_is_not_ambiguity() -> None:
 
 def test_ambiguous_match_does_not_also_report_the_candidates_as_extras() -> None:
     # Both colliding live accounts are consumed by the refusal. If either one
-    # slipped out of `matched`, it would reappear as an extra -- refused and
-    # extra at once, which makes no sense.
     plan = diff(
         chart(desired("5202", "Bank Charges")),
         site(
@@ -205,8 +194,6 @@ def test_ambiguous_match_does_not_also_report_the_candidates_as_extras() -> None
 
 def test_children_of_an_ambiguous_match_are_not_extras_either() -> None:
     # The walk stops at the ambiguity, so it never looks under either
-    # candidate. Reporting what it never examined as "not in the chart" would
-    # be a lie.
     plan = diff(
         chart(desired("5200", "Indirect", is_group=True)),
         site(
@@ -222,7 +209,6 @@ def test_children_of_an_ambiguous_match_are_not_extras_either() -> None:
 
 def test_group_flag_change_is_refused_rather_than_applied() -> None:
     # Converting a group to a leaf or back restructures the tree and can strand
-    # children. It is a conversation, not a diff.
     plan = diff(
         chart(desired("5100", "Direct Costs", is_group=True)),
         site(live("5100 - Direct Costs - AB", "Direct Costs", number="5100", is_group=False)),
@@ -260,8 +246,6 @@ def test_root_type_change_does_not_also_report_the_account_as_an_extra() -> None
 
 def test_renumber_and_retype_both_fire_for_the_same_account() -> None:
     # The two checks are independent `if` blocks, not an if/elif -- an
-    # account that differs in both number and type must produce both a
-    # RenumberAccount and a RetypeAccount, not just one.
     plan = diff(
         chart(desired("5202", "Bank Charges", account_type="Tax")),
         site(live("Bank Charges - AB", "Bank Charges", account_type="Expense")),
@@ -284,11 +268,6 @@ def test_refusal_detail_names_the_account_and_the_conflict() -> None:
 
 
 # --- number collisions -------------------------------------------------------
-#
-# ERPNext enforces a unique account_number per company. The disposable test
-# site used everywhere else in this file has no numbers at all, so no create
-# ever contended for one -- these fixtures give the live site a numbered chart
-# of its own, the shape that actually produced the defect.
 
 
 def test_create_whose_number_is_held_by_unrelated_live_account_is_refused() -> None:
@@ -306,9 +285,6 @@ def test_create_whose_number_is_held_by_unrelated_live_account_is_refused() -> N
 
 def test_create_whose_number_is_vacated_by_a_renumber_in_the_same_plan_is_not_refused() -> None:
     # The live account currently sitting on 5299 is itself being renumbered to
-    # 5301 by this plan. Renumbers run before creates, so 5299 is free by the
-    # time the create fires -- this must not be a collision, or an ordinary
-    # renumbering plan could never be applied.
     plan = diff(
         chart(
             desired("5301", "Old Category"),
@@ -325,9 +301,6 @@ def test_create_whose_number_is_vacated_by_a_renumber_in_the_same_plan_is_not_re
 
 def test_matched_account_keeping_its_own_number_is_not_reported_as_colliding_with_itself() -> None:
     # A root matched by root_type but renamed still produces a RenumberAccount
-    # (rename and renumber are the same ERPNext call) even when the number
-    # does not change. The account trivially still holds its own number, and
-    # that must not read as a collision with itself.
     plan = diff(
         [DesiredAccount("1000", "Assets", None, True, "Asset", None)],
         [
@@ -366,7 +339,6 @@ def test_renumber_whose_target_number_is_held_by_unrelated_live_account_is_refus
 
 def test_number_collision_refusal_makes_the_whole_plan_unapplyable() -> None:
     # A single collision blocks the plan even when everything else in it is
-    # fine, consistent with every other refusal reason.
     plan = diff(
         chart(
             desired("5299", "UNCATEGORISED"),
@@ -381,12 +353,6 @@ def test_number_collision_refusal_makes_the_whole_plan_unapplyable() -> None:
 
 
 # --- roots ------------------------------------------------------------------
-#
-# ERPNext will not insert an Account without a parent_account (HTTP 417,
-# MandatoryError), so a chart root can only ever be matched, never created. A
-# site set up by ERPNext itself names its roots "Application of Funds
-# (Assets)", "Source of Funds (Liabilities)" and "Income" -- none of which are
-# our names. root_type is the only thing that identifies a root.
 
 
 def test_root_matches_by_root_type_even_when_the_name_differs() -> None:
@@ -404,11 +370,6 @@ def test_root_matches_by_root_type_even_when_the_name_differs() -> None:
 
 def test_a_child_of_a_renamed_root_matches_rather_than_duplicating() -> None:
     # The defect this walk exists to fix. Live "Current Assets - AB" hangs off
-    # "Application of Funds (Assets) - AB"; the chart hangs "Current Assets"
-    # off "Assets". Matched against the pre-apply live names those are two
-    # different accounts, so the live one became an extra, the desired one a
-    # create, and applying that duplicated the subtree. Worse, the run after
-    # that matched cleanly and reported nothing to do.
     plan = diff(
         [
             DesiredAccount("1000", "Assets", None, True, "Asset", None),

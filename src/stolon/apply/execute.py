@@ -1,17 +1,14 @@
 """Turn a ChartPlan into requests, in the only order that works.
 
-Renumbers run before creates. A new account is linked to its parent by the
-parent's *document name*, and a renumber changes that name -- so creating first
-would link a child to a name that is about to stop existing. Renumbering first
-means every parent's name is final before anything references it.
+Renumbers run before creates: a new account links to its parent by the
+parent's *document name*, and a renumber changes that name, so creating
+first would link a child to a name about to stop existing.
 
-Renumbers need their own order among themselves, though: measured live, a
-plan renumbering "Current Assets" to 1100 before "Cash In Hand" (the account
-actually sitting at 1100) had renumbered away from it died with a plain
-"number already used" error. `stolon.apply.order.order_renumbers` works out
-that order -- and, when two or more renumbers form a genuine cycle (each
-wanting a number only another member of the same cycle is about to vacate),
-inserts a park step that moves one of them to a temporary number first.
+Renumbers need their own order among themselves too -- measured live,
+renumbering "Current Assets" to 1100 before "Cash In Hand" (still sitting on
+1100) vacated it died with a plain "number already used" error.
+`stolon.apply.order.order_renumbers` works out that order, inserting a park
+step onto a temporary number when two or more renumbers form a genuine cycle.
 """
 
 from __future__ import annotations
@@ -28,11 +25,7 @@ RENUMBER_METHOD = "erpnext.accounts.doctype.account.account.update_account_numbe
 
 
 class PlanRefusedError(RuntimeError):
-    """The plan carried refusals, so nothing was executed.
-
-    Raised before the first request. A partially applied chart is worse than an
-    unapplied one: the next run diffs against a state nobody chose.
-    """
+    """The plan carried refusals; raised before the first request so nothing runs partially applied."""
 
 
 class _Writer(Protocol):
@@ -45,11 +38,9 @@ class _Writer(Protocol):
 class ApplyReport:
     """What actually happened, for printing back to the operator.
 
-    `parked` is (old document name, temporary number, resulting document
-    name) for every account `order_renumbers` had to move out of the way to
-    break a renumbering cycle -- distinct from `renumbered`, which is only
-    the moves the chart actually wanted. A parked account's real renumber
-    still runs and lands in `renumbered` once it does.
+    `parked` is every account `order_renumbers` moved out of the way to
+    break a renumbering cycle -- distinct from `renumbered`, the moves the
+    chart wanted. A parked account's real renumber still lands in `renumbered` too.
     """
 
     created: list[str] = dataclasses.field(default_factory=list)
@@ -69,16 +60,11 @@ def _execute_renumbers(
 ) -> dict[str, str]:
     """Run every renumber, and any park step `order_renumbers` had to insert, in order.
 
-    A parked account's document name changes twice -- once to its temporary
-    number, once to its real one -- so `current_name` tracks each renumbered
-    account's *current* document name (keyed by its original one) rather than
-    trusting `RenumberAccount.live.document_name`, which only ever holds the
-    name it had before this run touched it at all.
-
-    `chart_numbers` and `taken` are passed straight through to
-    `order_renumbers`, which needs the whole site's occupied numbers and the
-    whole chart's desired numbers to pick a collision-free park number --
-    not just the numbers this plan's own renumbers happen to mention.
+    A parked account's document name changes twice -- to its temporary
+    number, then its real one -- so `current_name` tracks each renumbered
+    account's *current* document name (keyed by its original one) rather
+    than trusting `RenumberAccount.live.document_name`, which only ever
+    holds the pre-run name.
 
     Returns:
         The same desired-number -> final-document-name map `apply_chart`
@@ -128,9 +114,9 @@ def _swap_leading_number(old_document_name: str, old_number: str, new_number: st
     """Fallback when the server returns no name: swap just the leading number.
 
     A document name is `"{number} - {name} - {abbr}"`; only the number
-    changed, so replacing that leading prefix reproduces it without needing
-    the abbreviation as a separate input (mirrors `stolon.apply.park`'s
-    identical fallback for the same reason).
+    changed, so replacing that leading prefix reproduces it without the
+    abbreviation as a separate input (mirrors `stolon.apply.park`'s
+    identical fallback).
     """
     return old_document_name.replace(f"{old_number} - ", f"{new_number} - ", 1)
 
@@ -146,8 +132,7 @@ def apply_chart(
     """Execute a plan. Raises PlanRefusedError before touching anything if it was refused.
 
     `live` is the whole pre-diff live chart, not just the accounts `plan`
-    singles out for a create/renumber/retype -- an unchanged, matched, or
-    extra account that `plan` never mentions can still already hold a
+    singles out: an account `plan` never mentions can still already hold a
     number `order_renumbers` might otherwise pick to park something onto.
     """
     if plan.refusals:

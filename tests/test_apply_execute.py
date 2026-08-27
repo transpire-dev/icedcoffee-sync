@@ -58,7 +58,6 @@ def test_a_refused_plan_is_not_executed_at_all() -> None:
 
 def test_renumbers_run_before_creates() -> None:
     # A create links to its parent's document name. If the parent is being
-    # renumbered, doing the create first links to a name about to disappear.
     parent = desired("5200", "Indirect", is_group=True)
     child = desired("5201", "Advertising", parent="5200")
     by_number = {"5200": parent, "5201": child}
@@ -110,7 +109,6 @@ def test_creates_are_ordered_parents_first() -> None:
 
 def test_renumber_uses_the_rpc_not_a_field_write() -> None:
     # Measured: a plain update does not move the document. update_account_number
-    # renames it and returns the new name.
     plan = ChartPlan(
         creates=[],
         renumbers=[RenumberAccount(live("Bank Charges - AB", "Bank Charges"), desired("5202", "Bank Charges"))],
@@ -128,10 +126,6 @@ def test_renumber_uses_the_rpc_not_a_field_write() -> None:
 
 def test_renumbers_run_in_dependency_order() -> None:
     # Measured live: apply_chart ran plan.renumbers in plan order and died
-    # -- "Current Assets" tried to take 1100 while "Cash In Hand" (the
-    # account actually sitting there) hadn't renumbered away from it yet.
-    # Listed here in that same (wrong) plan order; the executor must still
-    # run Cash In Hand's renumber first.
     current_assets = RenumberAccount(
         live("1100-1600 - Current Assets - AB", "Current Assets", "1100-1600"),
         desired("1100", "Current Assets", is_group=True),
@@ -149,7 +143,6 @@ def test_renumbers_run_in_dependency_order() -> None:
 
 def test_a_renumber_cycle_parks_before_either_renumber_runs() -> None:
     # A wants B's number and B wants A's -- neither can go first without
-    # parking one of them onto a temporary number.
     a = RenumberAccount(live("A - AB", "A", "10"), desired("20", "A"))
     b = RenumberAccount(live("B - AB", "B", "20"), desired("10", "B"))
     plan = ChartPlan(creates=[], renumbers=[a, b], retypes=[], extras=[], refusals=[])
@@ -162,8 +155,6 @@ def test_a_renumber_cycle_parks_before_either_renumber_runs() -> None:
     assert call_payloads[0][1]["account_name"] == "A"  # unchanged by the park
 
     # A's real renumber (last) must address the account by its post-park
-    # name, not the name it had before parking -- that document no longer
-    # exists under its original name.
     assert call_payloads[-1][1]["name"] == "910 - A - AB"
     assert call_payloads[-1][1]["account_number"] == "20"
 
@@ -172,13 +163,6 @@ def test_a_renumber_cycle_parks_before_either_renumber_runs() -> None:
 
 
 def test_park_step_avoids_a_number_an_untouched_live_account_already_holds() -> None:
-    # Regression: `apply_chart` used to hand `order_renumbers` only the
-    # numbers its own renumbers mentioned, so a park candidate could
-    # collide with some other live account this plan never touches at all
-    # -- on a real site, an unrelated account already sitting on "910"
-    # would have made this exact park request fail. Passing the full
-    # `live` list (not just the renumbered accounts) is what lets
-    # `apply_chart` see that "910" is already taken and escalate to "9910".
     a = RenumberAccount(live("A - AB", "A", "10"), desired("20", "A"))
     b = RenumberAccount(live("B - AB", "B", "20"), desired("10", "B"))
     bystander = live("Bystander - AB", "Bystander", "910")
@@ -191,9 +175,6 @@ def test_park_step_avoids_a_number_an_untouched_live_account_already_holds() -> 
 
 def test_a_rename_carries_the_charts_name_not_just_its_number() -> None:
     # A root is matched by root_type, so the live name can be ERPNext's own
-    # ("Application of Funds (Assets)") while the chart says "Assets".
-    # update_account_number sets account_name as well as account_number and
-    # returns the resulting document name, so one call covers both.
     plan = ChartPlan(
         creates=[],
         renumbers=[
@@ -253,8 +234,6 @@ def test_enable_writes_only_disabled_zero() -> None:
 
 def test_enable_uses_the_renamed_documents_current_name() -> None:
     # An account can be both renumbered and re-enabled in the same run; the
-    # enable must address it by its post-renumber name, not the one it had
-    # before this run touched it.
     live_account = live("Old Name - AB", "Old Name", "10")
     desired_account = desired("20", "New Name")
     plan = ChartPlan(

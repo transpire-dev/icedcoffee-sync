@@ -1,19 +1,11 @@
-"""Move a survivor's account number out of the chart's way, without deleting it.
+"""Move a surviving account's number out of the chart's way, without deleting it.
 
-`--allow-unapplied` prune can leave live accounts behind that `plan_prune`
-never offered to delete, or that `execute_prune` could only disable: ERPNext
-itself keeps some of its sample accounts alive by refilling certain Company
-defaults BY ACCOUNT NAME on every save (`default_income_account`,
-`write_off_account`, `exchange_gain_loss_account`, `disposal_account` --
-measured against `erpnext/setup/doctype/company/company.py`'s `on_update`),
-so those specific accounts can never be retired before `coa apply` has
-pointed the defaults at our own accounts instead. When such a survivor's
-account number is one the chart itself needs, `coa apply` cannot create the
-chart's account at that number either -- a `NUMBER_COLLISION` refusal, a
-second cycle. Parking breaks it: renumber the survivor onto an unused number
-high enough to never collide, so `coa apply` can create the real account,
-point the defaults at it, and a closing `coa prune` retire the parked
-survivor for good, now that nothing needs it by name any more.
+ERPNext refills four Company defaults (income, write-off, exchange gain/loss,
+asset disposal) by account name on every Company save and refuses to retire
+a default, so some pre-existing accounts cannot go before apply has pointed
+the defaults elsewhere -- yet apply cannot create the chart's account on a
+number they hold. Parking renumbers the survivor (9-prefixed) so apply can
+run; the closing prune retires it afterwards.
 """
 
 from __future__ import annotations
@@ -22,10 +14,9 @@ import dataclasses
 from typing import Any, Protocol
 
 from stolon.apply.model import LiveAccount
+from stolon.apply.prune import PruneReason, PruneRefusal, PruneReport
 
-# The same whitelisted method `stolon.apply.execute.apply_chart` uses to
-# renumber a chart account -- reused here so a survivor's rename goes through
-# the identical server-side path apply already relies on.
+# The whitelisted rename apply itself uses; a field update does not move the document.
 RENUMBER_METHOD = "erpnext.accounts.doctype.account.account.update_account_number"
 
 
@@ -54,30 +45,11 @@ def park_colliding_numbers(
     chart_numbers: frozenset[str],
     taken: frozenset[str],
 ) -> list[ParkedNumber]:
-    """Renumber every survivor whose number the chart still wants.
+    """Renumber every non-root survivor holding a chart number onto a free 9-prefixed one.
 
-    A survivor with no parent is a root and is skipped outright: `coa apply`
-    matches roots by `root_type`, not by number, and renames them itself --
-    parking one here would just be a redundant, conflicting rename.
-
-    For every other survivor whose `number` is in `chart_numbers`, the parked
-    number is `9` followed by the original -- prepending another `9` for as
-    long as the candidate collides with `taken`, `chart_numbers`, or a number
-    this call already chose for an earlier survivor. `account_name` is sent
-    unchanged; only the number moves.
-
-    Args:
-        client: Anything that can call a whitelisted server method.
-        survivors: Live accounts still on the site after prune -- disabled,
-            already-disabled, failed, or refused outright by `plan_prune`.
-        chart_numbers: Every account number the chart describes.
-        taken: Every account number already occupied on the site (plus,
-            typically, `chart_numbers` itself -- the caller's choice of how
-            widely to check).
-
-    Returns:
-        One `ParkedNumber` per survivor actually renumbered, in the order
-        `survivors` was given.
+    Roots are skipped: apply matches them by root type and renames them
+    itself. `taken` is every number occupied on the site; the chosen number
+    also avoids `chart_numbers` and earlier picks. Only the number moves.
     """
     parked: list[ParkedNumber] = []
     chosen: set[str] = set()
@@ -100,12 +72,36 @@ def park_colliding_numbers(
                 "account_number": candidate,
             },
         )
-        # Same fallback shape as `apply_chart`'s renumber step: the document
-        # name is "{number} - {name} - {abbr}", and only the number changed,
-        # so replacing just that leading prefix reproduces it without needing
-        # the abbreviation as a separate input.
+        # Document names are "{number} - {name} - {abbr}"; only the number changed.
         new_name = (
             str(new_name) if new_name else survivor.document_name.replace(f"{survivor.number} - ", f"{candidate} - ", 1)
         )
         parked.append(ParkedNumber(survivor.document_name, survivor.number, candidate, new_name))
     return parked
+
+
+def parking_candidates(
+    extras: list[LiveAccount],
+    report: PruneReport,
+    refusals: list[PruneRefusal],
+) -> tuple[list[LiveAccount], list[LiveAccount]]:
+    """Split prune's survivors into `(candidates, gl_excluded)`.
+
+    Candidates are the extras the run could not retire plus those refused
+    for any reason but GL entries -- renumbering never touches ledger
+    history, so a live child or root status is no obstacle. Extras refused
+    for GL entries are returned separately so the caller can still report
+    them as unresolved collisions.
+    """
+    gl_excluded = [refusal.live for refusal in refusals if refusal.reason is PruneReason.HAS_GL_ENTRIES]
+    survivor_names = set(report.disabled) | set(report.already_disabled) | {name for name, _ in report.failed}
+    survivor_names |= {
+        refusal.live.document_name for refusal in refusals if refusal.reason is not PruneReason.HAS_GL_ENTRIES
+    }
+    candidates = [extra for extra in extras if extra.document_name in survivor_names]
+    return candidates, gl_excluded
+
+
+def unresolved_collisions(excluded: list[LiveAccount], chart_numbers: frozenset[str]) -> list[str]:
+    """Document names of the non-root `excluded` accounts still holding a chart number -- a failure to report."""
+    return [a.document_name for a in excluded if a.parent_document_name is not None and a.number in chart_numbers]

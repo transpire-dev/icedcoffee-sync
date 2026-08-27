@@ -87,7 +87,6 @@ def test_insert_sends_the_document_as_json() -> None:
 
 def test_caller_headers_cannot_replace_the_credential() -> None:
     # _send_args must apply the auth header last, so a Request carrying its
-    # own Authorization key cannot silently displace the real credential.
     hostile = Request("GET", "/api/v2/document/Account", headers={"Authorization": "token evil:evil"})
     sent = _send_args(CONFIG, hostile)
     assert sent["headers"]["Authorization"] == "token KEY:SECRET"
@@ -100,7 +99,6 @@ def test_both_clients_expose_the_same_method_names() -> None:
 
 def test_async_client_methods_are_actually_async() -> None:
     # `dir()` cannot tell `def` from `async def`, so a method accidentally
-    # left synchronous on AsyncClient would pass a name-only comparison.
     import inspect
 
     for name in (n for n in dir(AsyncClient) if not n.startswith("_")):
@@ -122,8 +120,6 @@ def test_both_clients_take_the_same_parameters() -> None:
         if not (callable(sync_attribute) and callable(async_attribute)):
             continue
         # Compare Parameter objects, not just names: that also catches a
-        # default value (or kind, or annotation) that drifts between the two
-        # while the parameter list itself stays aligned.
         sync_params = list(inspect.signature(sync_attribute).parameters.values())
         async_params = list(inspect.signature(async_attribute).parameters.values())
         assert sync_params == async_params, f"{name} signatures differ"
@@ -131,8 +127,6 @@ def test_both_clients_take_the_same_parameters() -> None:
 
 def test_site_config_repr_hides_the_credentials() -> None:
     # A dataclass prints every field by default, and this object reaches log
-    # lines, tracebacks, and failing pytest assertions -- any of which would
-    # publish a reusable Frappe credential.
     rendered = repr(SiteConfig(url="https://example.test", api_key="KEY", api_secret="SECRET"))  # noqa: S106
     assert "KEY" not in rendered
     assert "SECRET" not in rendered
@@ -224,8 +218,6 @@ async def test_async_upload_file_sends_a_genuine_multipart_request() -> None:
 
 def test_lowercase_authorization_header_cannot_sit_alongside_the_credential() -> None:
     # HTTP header names are case-insensitive, so a lowercase `authorization`
-    # would otherwise survive the merge next to the real one -- two credentials
-    # on one request, with the server free to pick either.
     from stolon.frappe.client import _merge_headers
 
     hostile = Request("GET", "/api/v2/document/Account", headers={"authorization": "token evil:evil"})

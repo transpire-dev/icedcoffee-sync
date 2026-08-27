@@ -1,20 +1,11 @@
 """Order changes so each one can actually be executed when its turn comes.
 
-Creates need ordering among themselves: ERPNext links a new account to its
-parent's *document name*, so the parent must exist first. That is why the
-executor runs every renumber before any create: an account's own document
-name does not contain its parent's, so renaming a parent updates its
-children's links without changing their names, and by the time a child is
-created, its parent's document name is final regardless of what order the
-renumbers ran in.
-
-Renumbers need ordering among themselves too, though -- measured live:
-"Current Assets" tried to take account number 1100 while "Cash In Hand" was
-still sitting on it, and ERPNext refused with a plain "number already used"
-error. `stolon.apply.diff.ChartPlan` deliberately does not refuse this shape
-of collision -- a number another renumber in the same plan is about to
-vacate is not treated as contested -- so `apply_chart` has to actually run
-that vacating renumber first, not just assume the diff already ruled it out.
+ERPNext links a new account to its parent's *document name*, so the parent
+must exist first: creates run shallowest-first, and every renumber runs
+before any create. Renumbers also need their own order among themselves --
+measured live, "Current Assets" taking 1100 before "Cash In Hand" vacated it
+died with "number already used", a collision `ChartPlan` deliberately leaves
+for `order_renumbers` to resolve rather than refusing outright.
 """
 
 from __future__ import annotations
@@ -48,24 +39,13 @@ def depth(account: DesiredAccount, by_number: dict[str, DesiredAccount]) -> int:
 
 
 def order_creates(creates: list[CreateAccount], by_number: dict[str, DesiredAccount]) -> list[CreateAccount]:
-    """Shallowest first, preserving chart order within a depth.
-
-    A stable sort rather than a full topological walk: depth is a valid
-    topological order for a tree, and keeping chart order inside a level makes
-    the printed plan read like the chart file.
-    """
+    """Shallowest first, preserving chart order within a depth -- a stable sort, since depth is a valid tree order."""
     return sorted(creates, key=lambda c: depth(c.desired, by_number))
 
 
 @dataclasses.dataclass(frozen=True)
 class ParkStep:
-    """A temporary renumber inserted to break a cycle among renumbers.
-
-    Not a member of the chart -- nothing desires this number. It exists only
-    to free `live`'s original number for whoever is waiting on it; `live`'s
-    own real renumber (a `RenumberAccount`, further along in the same
-    ordered list) is what actually reaches the chart's intended number.
-    """
+    """A temporary renumber, not a chart member, that frees `live`'s number for whoever is waiting on it."""
 
     live: LiveAccount
     temporary_number: str
@@ -80,51 +60,17 @@ def order_renumbers(
     """Order renumbers so none tries to claim a number still occupied by another.
 
     Renumber X depends on renumber Y when `X.desired.number ==
-    Y.live.number` -- X wants the number Y currently sits on, so Y must run
-    (and thereby vacate it) first. This is a real dependency `ChartPlan`'s
-    own collision check deliberately does not refuse (a number another
-    renumber in the plan is about to vacate is not treated as contested,
-    precisely so a valid renumbering plan does not refuse itself forever) --
-    which means nothing upstream of this function guarantees the dependency
-    is even resolvable by ordering alone.
-
-    It usually is: a plain topological sort (Kahn's algorithm, always
-    picking the lowest original index among the accounts currently free to
-    run, which is what keeps two independent renumbers in their original
-    plan order) handles a chain of any length -- the case measured live was
-    one: Current Assets wanted 1100, which Cash In Hand still held on its
-    way to 1120, and plan order ran them the wrong way round. It is not
-    always resolvable when a genuine cycle exists -- two or more renumbers
-    each waiting on a number only another member of the same cycle is about
-    to vacate. Breaking it: park the
-    lowest-indexed member of the cycle onto a temporary number -- freeing
-    its original number without yet reaching its own desired number -- then
-    resume the topological walk; that member's own real renumber becomes
-    ready, and runs, once whatever IT was waiting on has vacated in turn.
-
-    A renumber whose `desired.number` equals its own `live.number` (a
-    name-only change) never depends on itself: the dependency check compares
-    against every *other* renumber in the list, never the renumber being
-    checked against itself.
+    Y.live.number`; `ChartPlan` deliberately leaves that unrefused, so a
+    topological sort must resolve it, breaking a genuine cycle by parking
+    its lowest-indexed member onto a temporary number.
 
     Args:
-        chart_numbers: Every account number the chart describes, not just
-            the ones this plan is renumbering.
-        taken: Every account number currently occupied on the live site, not
-            just the ones this plan is renumbering. An unchanged, matched,
-            or extra live account this plan never touches can already hold
-            whatever number a narrower check -- one built only from
-            `renumbers` itself -- would consider free, and so can a create
-            elsewhere in the same plan wanting a `chart_numbers` entry that
-            has not been inserted yet; a temporary park number landing on
-            either would just manufacture a fresh version of the same
-            collision (mirrors `stolon.apply.park.park_colliding_numbers`'s
-            identical two-set check).
+        chart_numbers: Every account number the chart describes.
+        taken: Every number occupied on the live site, including accounts
+            this plan does not touch.
 
     Returns:
-        `renumbers`, reordered, with a `ParkStep` spliced in wherever a
-        cycle had to be broken. Every `RenumberStep` exposes `.live`, so a
-        caller can print the sequence uniformly regardless of which kind it is.
+        `renumbers`, reordered, with a `ParkStep` wherever a cycle was broken.
     """
     n = len(renumbers)
     dependents, remaining = _dependency_graph(renumbers)
@@ -151,9 +97,7 @@ def order_renumbers(
             _vacate(ready)
             continue
 
-        # Every not-yet-done account is waiting on something not yet
-        # vacated: a cycle. Park the lowest-indexed member not already
-        # parked -- freeing its number is what lets the rest proceed.
+        # A cycle: park the lowest-indexed unvacated member to free its number.
         to_park = next(i for i in range(n) if i not in vacated)
         candidate = _unused_number(renumbers[to_park].live.number, avoid | parked_at)
         parked_at.add(candidate)

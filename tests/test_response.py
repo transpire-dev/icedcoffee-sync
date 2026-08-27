@@ -41,7 +41,6 @@ def test_captured_validation_fixture_raises_through_envelope() -> None:
 
 def test_absent_field_is_missing_not_none() -> None:
     # v2 includes empty fields, so absent and null mean different things:
-    # absent means "not selected", null means "explicitly cleared".
     assert field({"account_name": "Cash"}, "account_number") is MISSING
 
 
@@ -56,7 +55,6 @@ def test_missing_is_falsy_and_distinct_from_none() -> None:
 
 def test_captured_document_distinguishes_null_from_absent() -> None:
     # get_ok.json was captured specifically to prove this: 26 fields, 3 null,
-    # 3 empty-string. parent_account is one of the null ones.
     captured = json.loads((FIXTURES / "get_ok.json").read_text())
     doc = unwrap(captured["status"], captured["body"])
     assert doc["parent_account"] is None
@@ -85,13 +83,11 @@ def test_has_next_page_reads_the_flag() -> None:
 
 def test_has_next_page_is_none_when_absent() -> None:
     # v1 responses carry no such flag; callers must fall back rather than
-    # treat a missing flag as "no more pages".
     assert has_next_page({"data": []}) is None
 
 
 def test_has_next_page_is_none_when_explicitly_null() -> None:
     # A null flag is not the same as False -- both mean "server didn't say",
-    # and collapsing null to False would stop a listing one page early.
     assert has_next_page({"has_next_page": None, "data": []}) is None
 
 
