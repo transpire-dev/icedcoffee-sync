@@ -3,7 +3,15 @@
 from typing import Any
 
 import pytest
-from stolon.apply.diff import ChartPlan, CreateAccount, Refusal, RefusalReason, RenumberAccount, RetypeAccount
+from stolon.apply.diff import (
+    ChartPlan,
+    CreateAccount,
+    EnableAccount,
+    Refusal,
+    RefusalReason,
+    RenumberAccount,
+    RetypeAccount,
+)
 from stolon.apply.execute import PlanRefusedError, apply_chart
 from stolon.apply.model import DesiredAccount, LiveAccount
 
@@ -44,7 +52,7 @@ def test_a_refused_plan_is_not_executed_at_all() -> None:
     )
     client = FakeClient()
     with pytest.raises(PlanRefusedError, match="has_gl_entries"):
-        apply_chart(client, plan, {}, "AB", "Acmebike Cycling")
+        apply_chart(client, plan, [], {}, "AB", "Acmebike Cycling")
     assert client.actions == []
 
 
@@ -62,7 +70,7 @@ def test_renumbers_run_before_creates() -> None:
         refusals=[],
     )
     client = FakeClient()
-    apply_chart(client, plan, by_number, "AB", "Acmebike Cycling")
+    apply_chart(client, plan, [], by_number, "AB", "Acmebike Cycling")
     kinds = [a[0] for a in client.actions]
     assert kinds.index("call") < kinds.index("insert")
 
@@ -78,7 +86,7 @@ def test_create_links_to_the_parents_post_renumber_name() -> None:
         refusals=[],
     )
     client = FakeClient()
-    apply_chart(client, plan, {"5200": parent, "5201": child}, "AB", "Acmebike Cycling")
+    apply_chart(client, plan, [], {"5200": parent, "5201": child}, "AB", "Acmebike Cycling")
     inserted = next(doc for kind, doc in client.actions if kind == "insert")
     assert inserted["parent_account"] == "5200 - Indirect - AB"
 
@@ -95,7 +103,7 @@ def test_creates_are_ordered_parents_first() -> None:
         refusals=[],
     )
     client = FakeClient()
-    apply_chart(client, plan, {"5000": root, "5200": mid, "5201": leaf}, "AB", "Acmebike Cycling")
+    apply_chart(client, plan, [], {"5000": root, "5200": mid, "5201": leaf}, "AB", "Acmebike Cycling")
     numbers = [doc["account_number"] for kind, doc in client.actions if kind == "insert"]
     assert numbers == ["5000", "5200", "5201"]
 
@@ -111,7 +119,7 @@ def test_renumber_uses_the_rpc_not_a_field_write() -> None:
         refusals=[],
     )
     client = FakeClient()
-    report = apply_chart(client, plan, {}, "AB", "Acmebike Cycling")
+    report = apply_chart(client, plan, [], {}, "AB", "Acmebike Cycling")
     method, params = next(payload for kind, payload in client.actions if kind == "call")
     assert method == "erpnext.accounts.doctype.account.account.update_account_number"
     assert params == {"name": "Bank Charges - AB", "account_name": "Bank Charges", "account_number": "5202"}
@@ -134,7 +142,7 @@ def test_renumbers_run_in_dependency_order() -> None:
     )
     plan = ChartPlan(creates=[], renumbers=[current_assets, cash_in_hand], retypes=[], extras=[], refusals=[])
     client = FakeClient()
-    apply_chart(client, plan, {}, "AB", "Acmebike Cycling")
+    apply_chart(client, plan, [], {}, "AB", "Acmebike Cycling")
     call_names = [payload[1]["name"] for kind, payload in client.actions if kind == "call"]
     assert call_names == ["1100 - Cash In Hand - AB", "1100-1600 - Current Assets - AB"]
 
@@ -146,7 +154,7 @@ def test_a_renumber_cycle_parks_before_either_renumber_runs() -> None:
     b = RenumberAccount(live("B - AB", "B", "20"), desired("10", "B"))
     plan = ChartPlan(creates=[], renumbers=[a, b], retypes=[], extras=[], refusals=[])
     client = FakeClient()
-    report = apply_chart(client, plan, {}, "AB", "Acmebike Cycling")
+    report = apply_chart(client, plan, [], {}, "AB", "Acmebike Cycling")
 
     call_payloads = [payload for kind, payload in client.actions if kind == "call"]
     assert call_payloads[0][1]["account_number"] == "910"  # the park comes first
@@ -161,6 +169,24 @@ def test_a_renumber_cycle_parks_before_either_renumber_runs() -> None:
 
     assert report.parked == [("A - AB", "910", "910 - A - AB")]
     assert report.renumbered == [("B - AB", "10 - B - AB"), ("A - AB", "20 - A - AB")]
+
+
+def test_park_step_avoids_a_number_an_untouched_live_account_already_holds() -> None:
+    # Regression: `apply_chart` used to hand `order_renumbers` only the
+    # numbers its own renumbers mentioned, so a park candidate could
+    # collide with some other live account this plan never touches at all
+    # -- on a real site, an unrelated account already sitting on "910"
+    # would have made this exact park request fail. Passing the full
+    # `live` list (not just the renumbered accounts) is what lets
+    # `apply_chart` see that "910" is already taken and escalate to "9910".
+    a = RenumberAccount(live("A - AB", "A", "10"), desired("20", "A"))
+    b = RenumberAccount(live("B - AB", "B", "20"), desired("10", "B"))
+    bystander = live("Bystander - AB", "Bystander", "910")
+    plan = ChartPlan(creates=[], renumbers=[a, b], retypes=[], extras=[], refusals=[])
+    client = FakeClient()
+    report = apply_chart(client, plan, [a.live, b.live, bystander], {}, "AB", "Acmebike Cycling")
+
+    assert report.parked == [("A - AB", "9910", "9910 - A - AB")]
 
 
 def test_a_rename_carries_the_charts_name_not_just_its_number() -> None:
@@ -181,7 +207,7 @@ def test_a_rename_carries_the_charts_name_not_just_its_number() -> None:
         refusals=[],
     )
     client = FakeClient()
-    report = apply_chart(client, plan, {}, "AB", "Acmebike Cycling")
+    report = apply_chart(client, plan, [], {}, "AB", "Acmebike Cycling")
     _method, params = next(payload for kind, payload in client.actions if kind == "call")
     assert params == {
         "name": "Application of Funds (Assets) - AB",
@@ -200,10 +226,50 @@ def test_retype_writes_only_the_account_type() -> None:
         refusals=[],
     )
     client = FakeClient()
-    apply_chart(client, plan, {}, "AB", "Acmebike Cycling")
+    apply_chart(client, plan, [], {}, "AB", "Acmebike Cycling")
     name, doc = next(payload for kind, payload in client.actions if kind == "update")
     assert name == "2142 - X - AB"
     assert doc == {"account_type": "Tax"}
+
+
+def test_enable_writes_only_disabled_zero() -> None:
+    plan = ChartPlan(
+        creates=[],
+        renumbers=[],
+        retypes=[],
+        extras=[],
+        refusals=[],
+        enables=[
+            EnableAccount(live("5202 - Bank Charges - AB", "Bank Charges", "5202"), desired("5202", "Bank Charges"))
+        ],
+    )
+    client = FakeClient()
+    report = apply_chart(client, plan, [], {}, "AB", "Acmebike Cycling")
+    name, doc = next(payload for kind, payload in client.actions if kind == "update")
+    assert name == "5202 - Bank Charges - AB"
+    assert doc == {"disabled": 0}
+    assert report.enabled == ["5202 - Bank Charges - AB"]
+
+
+def test_enable_uses_the_renamed_documents_current_name() -> None:
+    # An account can be both renumbered and re-enabled in the same run; the
+    # enable must address it by its post-renumber name, not the one it had
+    # before this run touched it.
+    live_account = live("Old Name - AB", "Old Name", "10")
+    desired_account = desired("20", "New Name")
+    plan = ChartPlan(
+        creates=[],
+        renumbers=[RenumberAccount(live_account, desired_account)],
+        retypes=[],
+        extras=[],
+        refusals=[],
+        enables=[EnableAccount(live_account, desired_account)],
+    )
+    client = FakeClient()
+    apply_chart(client, plan, [], {}, "AB", "Acmebike Cycling")
+    update_name, update_doc = next(payload for kind, payload in client.actions if kind == "update")
+    assert update_name == "20 - New Name - AB"
+    assert update_doc == {"disabled": 0}
 
 
 def test_extras_are_never_touched() -> None:
@@ -211,5 +277,5 @@ def test_extras_are_never_touched() -> None:
 
     plan = ChartPlan([], [], [], [ExtraAccount(live("Buildings - AB", "Buildings"))], [])
     client = FakeClient()
-    apply_chart(client, plan, {}, "AB", "Acmebike Cycling")
+    apply_chart(client, plan, [], {}, "AB", "Acmebike Cycling")
     assert client.actions == []

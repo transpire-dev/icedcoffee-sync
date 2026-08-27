@@ -74,7 +74,9 @@ class ParkStep:
 type RenumberStep = RenumberAccount | ParkStep
 
 
-def order_renumbers(renumbers: list[RenumberAccount]) -> list[RenumberStep]:
+def order_renumbers(
+    renumbers: list[RenumberAccount], chart_numbers: frozenset[str], taken: frozenset[str]
+) -> list[RenumberStep]:
     """Order renumbers so none tries to claim a number still occupied by another.
 
     Renumber X depends on renumber Y when `X.desired.number ==
@@ -105,6 +107,20 @@ def order_renumbers(renumbers: list[RenumberAccount]) -> list[RenumberStep]:
     against every *other* renumber in the list, never the renumber being
     checked against itself.
 
+    Args:
+        chart_numbers: Every account number the chart describes, not just
+            the ones this plan is renumbering.
+        taken: Every account number currently occupied on the live site, not
+            just the ones this plan is renumbering. An unchanged, matched,
+            or extra live account this plan never touches can already hold
+            whatever number a narrower check -- one built only from
+            `renumbers` itself -- would consider free, and so can a create
+            elsewhere in the same plan wanting a `chart_numbers` entry that
+            has not been inserted yet; a temporary park number landing on
+            either would just manufacture a fresh version of the same
+            collision (mirrors `stolon.apply.park.park_colliding_numbers`'s
+            identical two-set check).
+
     Returns:
         `renumbers`, reordered, with a `ParkStep` spliced in wherever a
         cycle had to be broken. Every `RenumberStep` exposes `.live`, so a
@@ -112,10 +128,7 @@ def order_renumbers(renumbers: list[RenumberAccount]) -> list[RenumberStep]:
     """
     n = len(renumbers)
     dependents, remaining = _dependency_graph(renumbers)
-    # Every number this plan touches, on either side of a renumber -- a
-    # park's temporary number must collide with none of them, or it would
-    # just manufacture a fresh version of the same problem.
-    avoid = frozenset(number for r in renumbers for number in (r.live.number, r.desired.number) if number)
+    avoid = taken | chart_numbers
 
     done: set[int] = set()
     vacated: set[int] = set()

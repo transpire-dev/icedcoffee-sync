@@ -8,6 +8,7 @@ import contextlib
 import os
 import uuid
 from collections.abc import Iterator
+from urllib.parse import urlsplit
 
 import pytest
 from stolon.frappe.client import Client, SiteConfig
@@ -16,7 +17,29 @@ from stolon.frappe.lifecycle import DocStatus, SubmitNotPermittedError
 
 pytestmark = pytest.mark.live_frappe
 
-BOOKS_SITE = "transpire.frappe.cloud"
+# Every host these tests may run against -- an ALLOWLIST, not a denylist:
+# reaching a test site means naming it here. Mirrors `books.site`'s
+# `TEST_SITE_HOSTS` with its own constant, since `stolon` must not import
+# `books`; keep the two in sync by hand. A custom domain aliasing production
+# can never be added to this set -- that would defeat the one property an
+# allowlist gives that a denylist on the books hostname alone cannot: a
+# host sharing nothing textually with production is refused by default, not
+# admitted by accident.
+_TEST_SITE_HOSTS = frozenset({"transpire-test.frappe.cloud"})
+
+
+def _is_test_site(url: str) -> bool:
+    """True when `url`'s host, once normalised, is in `_TEST_SITE_HOSTS`.
+
+    Host compared exactly, not via substring on the whole URL: a raw
+    substring check would miss an allowlisted host appearing as a path or
+    query segment on an unrelated URL, or refuse a legitimate URL that
+    merely mentions it somewhere other than its host. The trailing-dot
+    strip matters because a fully-qualified host
+    ("transpire-test.frappe.cloud.") resolves to the identical site.
+    """
+    host = (urlsplit(url).hostname or "").lower().rstrip(".")
+    return host in _TEST_SITE_HOSTS
 
 
 @pytest.fixture
@@ -26,16 +49,11 @@ def client() -> Iterator[Client]:
     secret = os.environ.get("STOLON_TEST_SECRET")
     if not (url and key and secret):
         pytest.skip("STOLON_TEST_URL/KEY/SECRET not set")
-    # Compared case-insensitively: https://TRANSPIRE.FRAPPE.CLOUD would
-    # otherwise slip past a case-sensitive substring check straight through to
-    # a live client against the real ledger. This still only matches the one
-    # known hostname -- a custom-domain alias pointed at the same site would
-    # not be caught, so don't over-trust it as a complete guard.
-    if BOOKS_SITE in url.lower():
+    if not _is_test_site(url):
         # Fail, never skip. A skip here would read as "nothing to run" while
         # actually meaning "we were one env var away from writing junk
         # documents into the general ledger".
-        pytest.fail(f"refusing to run tests against the books site: {url}")
+        pytest.fail(f"refusing to run tests against a host not in _TEST_SITE_HOSTS: {url}")
     with Client(SiteConfig(url=url, api_key=key, api_secret=secret)) as c:
         yield c
 

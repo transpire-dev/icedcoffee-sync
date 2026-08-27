@@ -18,8 +18,17 @@ def desired(number, name, parent=ROOT_NUMBER, is_group=False, root="Expense", ac
     return DesiredAccount(number, name, parent, is_group, root, account_type)
 
 
-def live(document_name, name, number="", parent=ROOT_DOCUMENT, is_group=False, root="Expense", account_type=None):
-    return LiveAccount(document_name, number, name, parent, is_group, root, account_type)
+def live(
+    document_name,
+    name,
+    number="",
+    parent=ROOT_DOCUMENT,
+    is_group=False,
+    root="Expense",
+    account_type=None,
+    disabled=False,
+):
+    return LiveAccount(document_name, number, name, parent, is_group, root, account_type, disabled)
 
 
 def chart(*accounts):
@@ -58,6 +67,55 @@ def test_matching_number_and_type_produces_no_change() -> None:
     )
     assert not plan.creates and not plan.renumbers and not plan.retypes
     assert plan.is_empty
+
+
+def test_a_disabled_match_is_reported_for_enabling() -> None:
+    # Regression: `DesiredAccount` has no `disabled` field at all, so a
+    # disabled match used to produce an empty plan -- coa apply could
+    # report success while the chart's account stayed unusable, or a
+    # Company default ended up pointing at it.
+    plan = diff(
+        chart(desired("5202", "Bank Charges")),
+        site(live("5202 - Bank Charges - AB", "Bank Charges", number="5202", disabled=True)),
+        set(),
+    )
+    assert [e.live.document_name for e in plan.enables] == ["5202 - Bank Charges - AB"]
+    assert not plan.is_empty
+    assert plan.is_applyable
+
+
+def test_an_enabled_match_needing_no_other_change_reports_no_enable() -> None:
+    plan = diff(
+        chart(desired("5202", "Bank Charges")),
+        site(live("5202 - Bank Charges - AB", "Bank Charges", number="5202", disabled=False)),
+        set(),
+    )
+    assert plan.enables == []
+    assert plan.is_empty
+
+
+def test_a_disabled_match_that_also_needs_a_retype_reports_both() -> None:
+    plan = diff(
+        chart(desired("2142", "CA FTB LLC Tax Payable", account_type="Tax")),
+        site(live("2142 - CA FTB LLC Tax Payable - AB", "CA FTB LLC Tax Payable", number="2142", disabled=True)),
+        set(),
+    )
+    assert [r.desired.account_type for r in plan.retypes] == ["Tax"]
+    assert [e.live.document_name for e in plan.enables] == ["2142 - CA FTB LLC Tax Payable - AB"]
+
+
+def test_a_disabled_account_carrying_ledger_entries_is_still_enabled() -> None:
+    # Enabling never touches GL entries or the document's identity, unlike
+    # a rename or retype, so it is never checked against with_entries -- a
+    # disabled account with real history is exactly the one most worth
+    # re-enabling, not less.
+    plan = diff(
+        chart(desired("5202", "Bank Charges")),
+        site(live("5202 - Bank Charges - AB", "Bank Charges", number="5202", disabled=True)),
+        {"5202 - Bank Charges - AB"},
+    )
+    assert [e.live.document_name for e in plan.enables] == ["5202 - Bank Charges - AB"]
+    assert not plan.refusals
 
 
 def test_changed_account_type_is_a_retype() -> None:

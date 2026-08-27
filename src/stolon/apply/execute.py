@@ -56,10 +56,16 @@ class ApplyReport:
     renumbered: list[tuple[str, str]] = dataclasses.field(default_factory=list)
     parked: list[tuple[str, str, str]] = dataclasses.field(default_factory=list)
     retyped: list[str] = dataclasses.field(default_factory=list)
+    enabled: list[str] = dataclasses.field(default_factory=list)
 
 
 def _execute_renumbers(
-    client: _Writer, renumbers: list[RenumberAccount], abbr: str, report: ApplyReport
+    client: _Writer,
+    renumbers: list[RenumberAccount],
+    abbr: str,
+    report: ApplyReport,
+    chart_numbers: frozenset[str],
+    taken: frozenset[str],
 ) -> dict[str, str]:
     """Run every renumber, and any park step `order_renumbers` had to insert, in order.
 
@@ -68,6 +74,11 @@ def _execute_renumbers(
     account's *current* document name (keyed by its original one) rather than
     trusting `RenumberAccount.live.document_name`, which only ever holds the
     name it had before this run touched it at all.
+
+    `chart_numbers` and `taken` are passed straight through to
+    `order_renumbers`, which needs the whole site's occupied numbers and the
+    whole chart's desired numbers to pick a collision-free park number --
+    not just the numbers this plan's own renumbers happen to mention.
 
     Returns:
         The same desired-number -> final-document-name map `apply_chart`
@@ -79,7 +90,7 @@ def _execute_renumbers(
     def name_of(live: LiveAccount) -> str:
         return current_name.get(live.document_name, live.document_name)
 
-    for step in order_renumbers(renumbers):
+    for step in order_renumbers(renumbers, chart_numbers, taken):
         if isinstance(step, ParkStep):
             new_name = client.call(
                 RENUMBER_METHOD,
@@ -127,17 +138,26 @@ def _swap_leading_number(old_document_name: str, old_number: str, new_number: st
 def apply_chart(
     client: _Writer,
     plan: ChartPlan,
+    live: list[LiveAccount],
     by_number: dict[str, DesiredAccount],
     abbr: str,
     company: str,
 ) -> ApplyReport:
-    """Execute a plan. Raises PlanRefusedError before touching anything if it was refused."""
+    """Execute a plan. Raises PlanRefusedError before touching anything if it was refused.
+
+    `live` is the whole pre-diff live chart, not just the accounts `plan`
+    singles out for a create/renumber/retype -- an unchanged, matched, or
+    extra account that `plan` never mentions can still already hold a
+    number `order_renumbers` might otherwise pick to park something onto.
+    """
     if plan.refusals:
         reasons = ", ".join(sorted({r.reason.value for r in plan.refusals}))
         raise PlanRefusedError(f"plan carries {len(plan.refusals)} refusal(s): {reasons}")
 
+    chart_numbers = frozenset(by_number)
+    taken = frozenset(a.number for a in live if a.number)
     report = ApplyReport()
-    resolved = _execute_renumbers(client, plan.renumbers, abbr, report)
+    resolved = _execute_renumbers(client, plan.renumbers, abbr, report, chart_numbers, taken)
 
     for change in order_creates(plan.creates, by_number):
         want = change.desired
@@ -166,5 +186,10 @@ def apply_chart(
         target = resolved.get(change.desired.number, change.live.document_name)
         client.update("Account", target, {"account_type": change.desired.account_type or ""})
         report.retyped.append(target)
+
+    for change in plan.enables:
+        target = resolved.get(change.desired.number, change.live.document_name)
+        client.update("Account", target, {"disabled": 0})
+        report.enabled.append(target)
 
     return report

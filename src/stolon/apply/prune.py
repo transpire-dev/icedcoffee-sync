@@ -105,14 +105,21 @@ def plan_prune(
     Otherwise, an extra is refused rather than deleted when it carries
     ledger entries, when it is a root (ERPNext requires one root per
     root_type and rejects an Account with no parent, so a root can only
-    ever be matched, never created or removed), or when it still has a live
-    child that is not itself among the extras being deleted.
+    ever be matched, never created or removed), or when it still has a
+    live child that will still exist once this plan runs -- either a
+    matched account (never an extra to begin with) or an extra child that
+    was itself refused for some other reason.
 
-    That last case should not occur: under `stolon.apply.diff`'s tree
-    matching, a matched account's parent is always matched too, so an
-    extra's descendants are themselves all extras, and a whole extra subtree
-    should come out deletable together. `HAS_LIVE_CHILD` exists to catch
-    that invariant being wrong rather than to fire in normal operation.
+    That second kind of live child is why extras are decided deepest
+    first: a parent's own eligibility depends on whether each of its extra
+    children already cleared, so every child must be decided before the
+    parent that depends on it is even considered. Checking a child's mere
+    presence in `extras` (rather than whether it was actually cleared to
+    delete) would let a GL-entry-carrying child refused on its own account
+    still wave its otherwise-clean parent onto the delete list -- and it
+    would be ERPNext's own `ChildExistsError`, not this function, that
+    caught the mistake, disabling the parent despite the child surviving
+    underneath it.
 
     Args:
         extras: The live accounts the diff reported as not described by the
@@ -133,7 +140,6 @@ def plan_prune(
         A plan whose deletes are ordered deepest first, so a parent is never
         asked to delete before its children.
     """
-    extra_names = {account.document_name for account in extras}
     by_document_name = {account.document_name: account for account in live}
 
     live_children: dict[str, list[LiveAccount]] = {}
@@ -142,9 +148,15 @@ def plan_prune(
             live_children.setdefault(account.parent_document_name, []).append(account)
 
     deletable: list[LiveAccount] = []
+    deletable_names: set[str] = set()
     refusals: list[PruneRefusal] = []
 
-    for account in extras:
+    # Deepest first: a parent's eligibility depends on whether its own
+    # extra children already cleared, so every child must be decided
+    # before the parent that depends on it is even considered.
+    ordered_extras = sorted(extras, key=lambda account: _depth(account, by_document_name), reverse=True)
+
+    for account in ordered_extras:
         if account.document_name in accounts_with_entries:
             refusals.append(
                 PruneRefusal(
@@ -166,10 +178,15 @@ def plan_prune(
             )
             continue
 
+        # A child survives this run unless it is itself an extra that was
+        # already cleared to delete -- checked against `deletable_names`,
+        # not mere presence in `extras`, since an extra child can be
+        # refused on its own account (GL entries, its own live child) while
+        # this account would otherwise be clean.
         surviving_children = [
             child.document_name
             for child in live_children.get(account.document_name, [])
-            if child.document_name not in extra_names
+            if child.document_name not in deletable_names
         ]
         if surviving_children:
             found = ", ".join(surviving_children)
@@ -183,6 +200,7 @@ def plan_prune(
             continue
 
         deletable.append(account)
+        deletable_names.add(account.document_name)
 
     ordered = sorted(deletable, key=lambda account: _depth(account, by_document_name), reverse=True)
     return PrunePlan([DeleteAccount(account) for account in ordered], refusals)

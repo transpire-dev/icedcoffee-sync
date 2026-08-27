@@ -9,6 +9,7 @@ ERPNext upgrade adding or removing a type.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any, Protocol
 
 from stolon.apply.model import LiveAccount
@@ -95,18 +96,13 @@ _CHART_FIELDS = [
     "disabled",
 ]
 
-# A chart this size has never been seen on a live site; it exists so a fuller
-# chart is refused rather than silently truncated. A truncated read makes
-# every account past the cutoff look absent from the site, and an absent
-# account gets created again as a duplicate.
-_MAX_CHART_ACCOUNTS = 5000
-
 
 class _Reader(Protocol):
     """The slice of Client these reads need. Keeps the test doubles honest."""
 
     def list(self, doctype: str, **kwargs: Any) -> Any: ...
     def get(self, doctype: str, name: str) -> Any: ...
+    def iter_all(self, doctype: str, **kwargs: Any) -> Iterator[dict[str, Any]]: ...
 
 
 def company_abbr(client: _Reader, company: str) -> str:
@@ -127,25 +123,19 @@ def read_chart(client: _Reader, company: str) -> list[LiveAccount]:
     normalised to None here. Leaving "" in place would make an unparented root
     look like a child of an account named "".
 
-    Raises if the result exactly fills `_MAX_CHART_ACCOUNTS`: a single `list`
-    call has no way to distinguish "the chart has precisely this many
-    accounts" from "there are more the limit cut off", and a silent
-    truncation reads every missing account as absent from the site -- which
-    gets it created again as a duplicate.
+    Paged through `iter_all` rather than a single capped `list` call: a
+    server-side page cap can return fewer rows than were asked for while
+    still reporting more pages remain, and a single-shot read has no way to
+    notice that short of the cap coincidentally matching the true count. A
+    silently truncated read makes every account past the cutoff look absent
+    from the site, which gets it created again as a duplicate.
     """
-    rows = client.list(
+    rows = client.iter_all(
         "Account",
         fields=_CHART_FIELDS,
         filters=[["company", "=", company]],
-        limit=_MAX_CHART_ACCOUNTS,
         order_by="name asc",
     )
-    if len(rows) == _MAX_CHART_ACCOUNTS:
-        raise RuntimeError(
-            f"Company {company!r} returned {_MAX_CHART_ACCOUNTS} accounts, "
-            f"exactly the read cap -- the chart may be larger than that and "
-            f"got silently truncated; raise _MAX_CHART_ACCOUNTS to confirm"
-        )
     return [
         LiveAccount(
             document_name=row["name"],

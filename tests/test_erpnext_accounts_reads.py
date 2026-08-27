@@ -6,10 +6,11 @@ tests in Task 10 -- the lesson from building this client is that a double alone
 never catches a wrong picture of the API.
 """
 
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
-from stolon.erpnext.accounts import _MAX_CHART_ACCOUNTS, accounts_with_entries, company_abbr, read_chart
+from stolon.erpnext.accounts import accounts_with_entries, company_abbr, read_chart
 
 # FakeClient defines a public `list` method, which shadows the builtin `list`
 # type within the class body under Python 3.14's lazy annotation evaluation
@@ -28,6 +29,15 @@ class FakeClient:
     def list(self, doctype: str, **kwargs: Any) -> _Rows:
         self.calls.append((doctype, kwargs))
         return self.responses.get(doctype, [])
+
+    def iter_all(self, doctype: str, **kwargs: Any) -> Iterator[dict[str, Any]]:
+        # A plain pass-through: real pagination (page-size capping,
+        # has_next_page handling) is exercised against Client itself. This
+        # double only needs to prove read_chart asks for every row through
+        # iter_all rather than a single capped page, and folds whatever it
+        # yields.
+        self.calls.append((doctype, kwargs))
+        return iter(self.responses.get(doctype, []))
 
     def get(self, doctype: str, name: str) -> dict[str, Any]:
         # Satisfies the _Reader protocol's `get` method. live_account_types is
@@ -80,11 +90,13 @@ def test_read_chart_filters_to_the_company() -> None:
     assert ["company", "=", "Acmebike Cycling"] in kwargs["filters"]
 
 
-def test_read_chart_refuses_a_result_that_exactly_fills_the_cap() -> None:
-    # A page that exactly fills the cap can't be told apart from a page that
-    # got cut off there. Returning it anyway would read every account past
-    # the cap as absent from the site, and an absent account gets created
-    # again as a duplicate -- refusing is the only honest response.
+def test_read_chart_reads_through_iter_all_not_a_single_capped_page() -> None:
+    # A single `list` call with a fixed limit has no way to tell "the chart
+    # has exactly this many accounts" from "there are more the limit cut
+    # off" -- a server-side page cap can return fewer rows than asked for
+    # while still reporting more pages remain. iter_all follows that
+    # envelope until the server actually says stop, so read_chart never
+    # silently truncates regardless of how many accounts a real chart has.
     row = {
         "name": "x",
         "account_number": "",
@@ -94,9 +106,12 @@ def test_read_chart_refuses_a_result_that_exactly_fills_the_cap() -> None:
         "root_type": "Asset",
         "account_type": None,
     }
-    client = FakeClient({"Account": [row] * _MAX_CHART_ACCOUNTS})
-    with pytest.raises(RuntimeError, match="Acmebike Cycling"):
-        read_chart(client, "Acmebike Cycling")
+    many_accounts = 12_000
+    client = FakeClient({"Account": [row] * many_accounts})
+    accounts = read_chart(client, "Acmebike Cycling")
+    assert len(accounts) == many_accounts
+    doctype, _ = client.calls[0]
+    assert doctype == "Account"
 
 
 class _ProbeClient:
@@ -115,6 +130,10 @@ class _ProbeClient:
 
     def get(self, doctype: str, name: str) -> dict[str, Any]:
         return {"fields": []}
+
+    def iter_all(self, doctype: str, **kwargs: Any) -> Iterator[dict[str, Any]]:
+        # accounts_with_entries only ever calls list(); satisfies _Reader.
+        raise AssertionError("accounts_with_entries should never page")
 
 
 def test_accounts_with_entries_is_empty_when_nothing_is_asked() -> None:
@@ -162,6 +181,9 @@ def test_accounts_with_entries_does_not_let_a_busy_account_mask_a_quiet_neighbou
 
         def get(self, doctype: str, name: str) -> dict[str, Any]:
             return {"fields": []}
+
+        def iter_all(self, doctype: str, **kwargs: Any) -> Iterator[dict[str, Any]]:
+            raise AssertionError("accounts_with_entries should never page")
 
     client = DominatingLedger()
     # Both accounts genuinely carry entries; only "Busy Account" has enough

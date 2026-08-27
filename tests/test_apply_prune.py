@@ -66,6 +66,23 @@ def test_a_parent_whose_child_survives_is_refused() -> None:
     assert [r.reason for r in plan.refusals] == [PruneReason.HAS_LIVE_CHILD]
 
 
+def test_a_parent_extra_is_refused_when_its_extra_child_is_refused() -> None:
+    # Regression: checking a child's mere presence in `extras` (rather than
+    # whether it was actually cleared to delete) let a GL-entry-carrying
+    # child refused on its own account still wave its otherwise-clean
+    # parent onto the delete list. ERPNext's own ChildExistsError, not
+    # plan_prune, would have caught the mistake, disabling the parent
+    # despite the child surviving underneath it.
+    root = live("Expenses - AB", "Expenses")
+    group = live("Old Group - AB", "Old Group", parent="Expenses - AB", is_group=True)
+    busy_child = live("Busy Leaf - AB", "Busy Leaf", parent="Old Group - AB")
+    plan = plan_prune([group, busy_child], [root, group, busy_child], {"Busy Leaf - AB"})
+    reasons = {r.live.document_name: r.reason for r in plan.refusals}
+    assert reasons["Busy Leaf - AB"] == PruneReason.HAS_GL_ENTRIES
+    assert reasons["Old Group - AB"] == PruneReason.HAS_LIVE_CHILD
+    assert not plan.deletes
+
+
 def test_a_refused_account_does_not_block_the_others() -> None:
     # The opposite of ChartPlan on purpose: deletions are independent.
     root = live("Expenses - AB", "Expenses")

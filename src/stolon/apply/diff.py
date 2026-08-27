@@ -86,6 +86,25 @@ class ExtraAccount:
 
 
 @dataclasses.dataclass(frozen=True)
+class EnableAccount:
+    """A matched account the chart wants working, but the site has disabled.
+
+    `DesiredAccount` has no `disabled` field -- the chart format has no way
+    to describe a disabled account at all -- so any live account this diff
+    matches is something the chart wants enabled, unconditionally. Seeing
+    `disabled=True` on a match is therefore always drift, never an intended
+    state, and correcting it is as unambiguous as a rename or a retype:
+    flip the field back. Unlike those two, this never touches GL entries or
+    the document's identity, so it is never checked against
+    `with_entries` -- a disabled account carrying real history is exactly
+    the account most worth re-enabling, not less.
+    """
+
+    live: LiveAccount
+    desired: DesiredAccount
+
+
+@dataclasses.dataclass(frozen=True)
 class Refusal:
     """A situation the diff will not resolve on its own.
 
@@ -103,13 +122,19 @@ class Refusal:
 
 @dataclasses.dataclass(frozen=True)
 class ChartPlan:
-    """Everything the diff concluded."""
+    """Everything the diff concluded.
+
+    `enables` defaults to empty and sits last so every existing positional
+    `ChartPlan(...)` construction -- test fixtures especially -- keeps
+    working unchanged; it is not less important than the fields before it.
+    """
 
     creates: list[CreateAccount]
     renumbers: list[RenumberAccount]
     retypes: list[RetypeAccount]
     extras: list[ExtraAccount]
     refusals: list[Refusal]
+    enables: list[EnableAccount] = dataclasses.field(default_factory=list)
 
     @property
     def is_applyable(self) -> bool:
@@ -119,7 +144,7 @@ class ChartPlan:
     @property
     def is_empty(self) -> bool:
         """True when the site already matches the chart."""
-        return not (self.creates or self.renumbers or self.retypes)
+        return not (self.creates or self.renumbers or self.retypes or self.enables)
 
 
 def diff(
@@ -157,7 +182,7 @@ def diff(
     walk.roots()
     walk.number_collisions(live)
     extras = [ExtraAccount(a) for a in live if a.document_name not in walk.matched]
-    return ChartPlan(walk.creates, walk.renumbers, walk.retypes, extras, walk.refusals)
+    return ChartPlan(walk.creates, walk.renumbers, walk.retypes, extras, walk.refusals, walk.enables)
 
 
 @dataclasses.dataclass
@@ -171,6 +196,7 @@ class _Walk:
     creates: list[CreateAccount] = dataclasses.field(default_factory=list)
     renumbers: list[RenumberAccount] = dataclasses.field(default_factory=list)
     retypes: list[RetypeAccount] = dataclasses.field(default_factory=list)
+    enables: list[EnableAccount] = dataclasses.field(default_factory=list)
     refusals: list[Refusal] = dataclasses.field(default_factory=list)
     matched: set[str] = dataclasses.field(default_factory=set)
 
@@ -254,6 +280,8 @@ class _Walk:
             self.renumbers.append(RenumberAccount(have, want))
         if wants_retype:
             self.retypes.append(RetypeAccount(have, want))
+        if have.disabled:
+            self.enables.append(EnableAccount(have, want))
 
     def children(self, want: DesiredAccount, have: LiveAccount) -> None:
         """Match a matched pair's children to each other by account name.
