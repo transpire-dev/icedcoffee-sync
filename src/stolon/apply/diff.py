@@ -297,7 +297,8 @@ class _Walk:
         counterparts: list[LiveAccount | None] = [None] * len(kids)
         taken: set[str] = set()
         self._claim_by_number(kids, siblings, counterparts, taken)
-        refused = self._claim_by_name(kids, siblings, counterparts, taken, have)
+        refused = self._refuse_contested_claims(kids, siblings, counterparts, have)
+        refused |= self._claim_by_name(kids, siblings, counterparts, taken, have, refused)
 
         for index, kid in enumerate(kids):
             if index in refused:
@@ -323,6 +324,57 @@ class _Walk:
                 counterparts[index] = match
                 taken.add(match.document_name)
 
+    def _refuse_contested_claims(
+        self,
+        kids: list[DesiredAccount],
+        siblings: list[LiveAccount],
+        counterparts: list[LiveAccount | None],
+        have: LiveAccount,
+    ) -> set[int]:
+        """Refuse where one chart entry owns a live account by number and another names it.
+
+        The signature of an identity swap: the chart moves an account to a new
+        number while a different entry takes the number it left, and both point
+        at the same live document. Preferring the number silently repurposes
+        it -- and while the GL-entry guard stops that for an account with
+        ledger history, an *empty* account can still be linked from Bank
+        Account records, tax templates or the Company defaults, and every one
+        of those links follows the rename to the wrong account.
+
+        Which of the two readings the author meant is genuinely unknowable
+        here, so this refuses instead of guessing. Splitting the change across
+        two applies resolves it.
+
+        A swap of names between two accounts that each keep their number is
+        not this: there the contested account is claimed by number too, and
+        both entries end up where they belong.
+        """
+        claimed_by_number = {
+            counterpart.document_name: index for index, counterpart in enumerate(counterparts) if counterpart
+        }
+        refused: set[int] = set()
+        for index, kid in enumerate(kids):
+            if counterparts[index] is not None:
+                continue
+            for sibling in siblings:
+                if sibling.name != kid.name:
+                    continue
+                owner = claimed_by_number.get(sibling.document_name)
+                if owner is None or owner == index:
+                    continue
+                self.refuse(
+                    kid,
+                    RefusalReason.AMBIGUOUS_MATCH,
+                    f"chart {kid.number} {kid.name!r} matches {sibling.document_name} by name, but chart "
+                    f"{kids[owner].number} already claims it by number; apply the renumber and the "
+                    f"reuse of its old number as two separate changes",
+                    [sibling],
+                )
+                self.consume([sibling])
+                refused.add(index)
+                break
+        return refused
+
     def _claim_by_name(
         self,
         kids: list[DesiredAccount],
@@ -330,6 +382,7 @@ class _Walk:
         counterparts: list[LiveAccount | None],
         taken: set[str],
         have: LiveAccount,
+        already_refused: set[int],
     ) -> set[int]:
         """Pair what the numbers left over, by name. Returns the indices refused as ambiguous."""
         by_name: dict[str, list[LiveAccount]] = {}
@@ -338,7 +391,7 @@ class _Walk:
 
         refused: set[int] = set()
         for index, kid in enumerate(kids):
-            if counterparts[index] is not None:
+            if counterparts[index] is not None or index in already_refused:
                 continue
             candidates = [c for c in by_name.get(kid.name, []) if c.document_name not in taken]
             if len(candidates) > 1:

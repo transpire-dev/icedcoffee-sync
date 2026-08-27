@@ -217,10 +217,12 @@ def test_a_rename_does_not_collide_with_the_account_being_renamed() -> None:
     assert plan.is_applyable
 
 
-def test_a_number_match_is_not_stolen_by_another_siblings_name() -> None:
-    # 5203 owns the live 5203 whatever it is currently called, so the name
-    # pass must not hand that same account to 5202 on the strength of its
-    # name. One loop matching name-then-number in chart order would.
+def test_two_chart_entries_contesting_one_live_account_are_refused() -> None:
+    # 5203 claims the live 5203 by number while 5202 claims the same account by
+    # name, and there is no way to tell whether the author meant to rename 5203
+    # or to renumber "Bank Charges". Guessing the number would repurpose the
+    # document, carrying every non-GL link on it -- a Bank Account record, a tax
+    # template, a Company default -- to the wrong account.
     plan = diff(
         chart(
             desired("5203", "Depreciation"),
@@ -229,10 +231,28 @@ def test_a_number_match_is_not_stolen_by_another_siblings_name() -> None:
         site(live("5203 - Bank Charges - AB", "Bank Charges", number="5203")),
         set(),
     )
-    assert [(r.live.document_name, r.desired.name) for r in plan.renames] == [
-        ("5203 - Bank Charges - AB", "Depreciation")
-    ]
-    assert [c.desired.number for c in plan.creates] == ["5202"]
+    assert [r.reason for r in plan.refusals] == [RefusalReason.AMBIGUOUS_MATCH]
+    assert "5203 - Bank Charges - AB" in plan.refusals[0].detail
+    assert not plan.is_applyable
+
+
+def test_a_name_match_on_an_uncontested_sibling_still_pairs() -> None:
+    # The other half of the rule above: a name match is only contested when
+    # some other chart entry owns that same account by number. Here nothing
+    # does, so the unnumbered stock account is adopted as usual.
+    plan = diff(
+        chart(
+            desired("5203", "Depreciation"),
+            desired("5202", "Bank Charges"),
+        ),
+        site(
+            live("5203 - Depreciation - AB", "Depreciation", number="5203"),
+            live("Bank Charges - AB", "Bank Charges"),
+        ),
+        set(),
+    )
+    assert not plan.refusals
+    assert [(r.live.document_name, r.desired.number) for r in plan.renames] == [("Bank Charges - AB", "5202")]
 
 
 def test_a_number_match_settles_two_siblings_sharing_a_name() -> None:
@@ -493,15 +513,13 @@ def test_create_whose_number_is_vacated_by_a_renumber_in_the_same_plan_is_not_re
     assert plan.is_applyable
 
 
-def test_renumbering_an_account_whose_number_another_chart_entry_takes_swaps_the_documents() -> None:
-    # The cost of number-first, pinned deliberately. Asked to move "Old
-    # Category" to 5301 and put a new account on the 5299 it leaves behind --
-    # within one parent -- the diff reads 5299 as "the account numbered 5299"
-    # and renames it, creating "Old Category" fresh at 5301. The end state is
-    # the chart either way; only which document carries which identity differs,
-    # and that is immaterial for an account with no entries. One with entries
-    # is refused (HAS_GL_ENTRIES) rather than reinterpreted, which is what
-    # keeps this a curiosity rather than a hazard.
+def test_renumbering_an_account_while_reusing_its_old_number_is_refused() -> None:
+    # Asked to move "Old Category" to 5301 and put a new account on the 5299
+    # it leaves behind, within one parent, both chart entries point at the one
+    # live document: 5299 by number, 5301 by name. Preferring the number would
+    # keep that document and relabel it UNCATEGORISED, dragging whatever links
+    # to it along. Split into two applies -- renumber first, then add -- and
+    # each step is unambiguous.
     plan = diff(
         chart(
             desired("5301", "Old Category"),
@@ -510,11 +528,9 @@ def test_renumbering_an_account_whose_number_another_chart_entry_takes_swaps_the
         site(live("5299 - Old Category - AB", "Old Category", number="5299")),
         set(),
     )
-    assert not plan.refusals
-    assert [c.desired.number for c in plan.creates] == ["5301"]
-    assert [(r.live.document_name, r.desired.name) for r in plan.renames] == [
-        ("5299 - Old Category - AB", "UNCATEGORISED")
-    ]
+    assert [r.reason for r in plan.refusals] == [RefusalReason.AMBIGUOUS_MATCH]
+    assert "two separate changes" in plan.refusals[0].detail
+    assert not plan.is_applyable
 
 
 def test_matched_account_keeping_its_own_number_is_not_reported_as_colliding_with_itself() -> None:
