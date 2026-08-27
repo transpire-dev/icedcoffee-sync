@@ -39,11 +39,30 @@ class CreateAccount:
 
 
 @dataclasses.dataclass(frozen=True)
-class RenumberAccount:
-    """A matched account whose number or name differs. Executed as a rename."""
+class RenameAccount:
+    """A matched account whose number or name differs.
+
+    One bucket for both because ERPNext names a document
+    `{number} - {name} - {abbr}`: changing either field is the same single
+    rename call, and ordering them is the same problem either way.
+
+    They are not the same thing to a person, though, so `changes_number` and
+    `changes_name` tell them apart. A renumber moves the GL code the bank
+    shows against every transaction; a rename only changes the label on it.
+    """
 
     live: LiveAccount
     desired: DesiredAccount
+
+    @property
+    def changes_number(self) -> bool:
+        """True when the account's number moves."""
+        return self.live.number != self.desired.number
+
+    @property
+    def changes_name(self) -> bool:
+        """True when the account's name changes."""
+        return self.live.name != self.desired.name
 
 
 @dataclasses.dataclass(frozen=True)
@@ -99,7 +118,7 @@ class ChartPlan:
     """
 
     creates: list[CreateAccount]
-    renumbers: list[RenumberAccount]
+    renames: list[RenameAccount]
     retypes: list[RetypeAccount]
     extras: list[ExtraAccount]
     refusals: list[Refusal]
@@ -113,7 +132,7 @@ class ChartPlan:
     @property
     def is_empty(self) -> bool:
         """True when the site already matches the chart."""
-        return not (self.creates or self.renumbers or self.retypes or self.enables)
+        return not (self.creates or self.renames or self.retypes or self.enables)
 
 
 def diff(
@@ -146,7 +165,7 @@ def diff(
     walk.roots()
     walk.number_collisions(live)
     extras = [ExtraAccount(a) for a in live if a.document_name not in walk.matched]
-    return ChartPlan(walk.creates, walk.renumbers, walk.retypes, extras, walk.refusals, walk.enables)
+    return ChartPlan(walk.creates, walk.renames, walk.retypes, extras, walk.refusals, walk.enables)
 
 
 @dataclasses.dataclass
@@ -158,7 +177,7 @@ class _Walk:
     desired_children: dict[str | None, list[DesiredAccount]]
     live_children: dict[str | None, list[LiveAccount]]
     creates: list[CreateAccount] = dataclasses.field(default_factory=list)
-    renumbers: list[RenumberAccount] = dataclasses.field(default_factory=list)
+    renames: list[RenameAccount] = dataclasses.field(default_factory=list)
     retypes: list[RetypeAccount] = dataclasses.field(default_factory=list)
     enables: list[EnableAccount] = dataclasses.field(default_factory=list)
     refusals: list[Refusal] = dataclasses.field(default_factory=list)
@@ -240,7 +259,7 @@ class _Walk:
             return
 
         if wants_rename:
-            self.renumbers.append(RenumberAccount(have, want))
+            self.renames.append(RenameAccount(have, want))
         if wants_retype:
             self.retypes.append(RetypeAccount(have, want))
         if have.disabled:
@@ -343,8 +362,8 @@ class _Walk:
 
         Not local to a matched pair, unlike `reconcile`'s checks: the
         contested account can be anywhere in the tree. Checked against the
-        state *after* this plan's own renumbers land -- `apply_chart` runs
-        renumbers before creates, so a number this plan itself vacates is
+        state *after* this plan's own renames land -- `apply_chart` runs
+        renames before creates, so a number this plan itself vacates is
         not a collision, or a valid renumbering plan would refuse itself
         forever.
 
@@ -353,7 +372,7 @@ class _Walk:
                 contested account may be one this walk never visited.
         """
         live_by_number = {a.number: a for a in live if a.number}
-        vacated = {r.live.number for r in self.renumbers if r.live.number and r.live.number != r.desired.number}
+        vacated = {r.live.number for r in self.renames if r.live.number and r.live.number != r.desired.number}
 
         def check(want: DesiredAccount, counterpart: LiveAccount | None) -> None:
             if not want.number or want.number in vacated:
@@ -373,7 +392,7 @@ class _Walk:
 
         for change in self.creates:
             check(change.desired, None)
-        for change in self.renumbers:
+        for change in self.renames:
             check(change.desired, change.live)
 
     def create(self, want: DesiredAccount) -> None:

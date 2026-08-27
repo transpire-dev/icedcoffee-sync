@@ -2,9 +2,9 @@
 document that has to already exist."""
 
 import pytest
-from stolon.apply.diff import CreateAccount, RenumberAccount
+from stolon.apply.diff import CreateAccount, RenameAccount
 from stolon.apply.model import DesiredAccount, LiveAccount
-from stolon.apply.order import CyclicChartError, ParkStep, depth, order_creates, order_renumbers
+from stolon.apply.order import CyclicChartError, ParkStep, depth, order_creates, order_renames
 
 
 def desired(number, name, parent=None):
@@ -55,19 +55,19 @@ def live(document_name, number, name, parent=None):
 
 
 def renumber(live_account, desired_account):
-    return RenumberAccount(live_account, desired_account)
+    return RenameAccount(live_account, desired_account)
 
 
-def _order(renumbers):
-    """Call `order_renumbers` with the avoid-set built the way `apply_chart`
-    builds it in production: every number these renumbers mention, on
+def _order(renames):
+    """Call `order_renames` with the avoid-set built the way `apply_chart`
+    builds it in production: every number these renames mention, on
     either side. Tests that need a *wider* avoid set -- to reproduce a
-    collision with an account these renumbers never touch -- call
-    `order_renumbers` directly instead.
+    collision with an account these renames never touch -- call
+    `order_renames` directly instead.
     """
-    chart_numbers = frozenset(r.desired.number for r in renumbers)
-    taken = frozenset(r.live.number for r in renumbers if r.live.number)
-    return order_renumbers(renumbers, chart_numbers, taken)
+    chart_numbers = frozenset(r.desired.number for r in renames)
+    taken = frozenset(r.live.number for r in renames if r.live.number)
+    return order_renames(renames, chart_numbers, taken)
 
 
 def test_the_live_current_assets_cash_in_hand_pair_orders_cash_in_hand_first() -> None:
@@ -107,7 +107,7 @@ def test_a_two_cycle_is_broken_with_a_park_step() -> None:
     a = renumber(live("A - T", "10", "A"), desired("20", "A"))
     b = renumber(live("B - T", "20", "B"), desired("10", "B"))
     ordered = _order([a, b])
-    assert [type(step).__name__ for step in ordered] == ["ParkStep", "RenumberAccount", "RenumberAccount"]
+    assert [type(step).__name__ for step in ordered] == ["ParkStep", "RenameAccount", "RenameAccount"]
     assert isinstance(ordered[0], ParkStep)
     assert ordered[0].live.document_name == "A - T"
     assert ordered[0].temporary_number == "910"
@@ -118,7 +118,7 @@ def test_a_two_cycle_is_broken_with_a_park_step() -> None:
 def test_park_avoids_a_number_an_untouched_live_account_already_holds() -> None:
     a = renumber(live("A - T", "10", "A"), desired("20", "A"))
     b = renumber(live("B - T", "20", "B"), desired("10", "B"))
-    ordered = order_renumbers([a, b], frozenset({"10", "20"}), frozenset({"10", "20", "910"}))
+    ordered = order_renames([a, b], frozenset({"10", "20"}), frozenset({"10", "20", "910"}))
     park = next(step for step in ordered if isinstance(step, ParkStep))
     assert park.temporary_number == "9910"
 
@@ -129,4 +129,4 @@ def test_a_name_only_change_does_not_depend_on_itself() -> None:
     other = renumber(live("Other - T", "20", "Other"), desired("21", "Other"))
     ordered = _order([rename_only, other])
     assert [step.live.document_name for step in ordered] == ["Old Name - T", "Other - T"]
-    assert isinstance(ordered[0], RenumberAccount)
+    assert isinstance(ordered[0], RenameAccount)

@@ -55,7 +55,7 @@ def test_unnumbered_live_account_is_renumbered_not_recreated() -> None:
         set(),
     )
     assert not plan.creates
-    assert [(r.live.document_name, r.desired.number) for r in plan.renumbers] == [("Bank Charges - AB", "5202")]
+    assert [(r.live.document_name, r.desired.number) for r in plan.renames] == [("Bank Charges - AB", "5202")]
 
 
 def test_matching_number_and_type_produces_no_change() -> None:
@@ -64,7 +64,7 @@ def test_matching_number_and_type_produces_no_change() -> None:
         site(live("5202 - Bank Charges - AB", "Bank Charges", number="5202", account_type="Tax")),
         set(),
     )
-    assert not plan.creates and not plan.renumbers and not plan.retypes
+    assert not plan.creates and not plan.renames and not plan.retypes
     assert plan.is_empty
 
 
@@ -131,7 +131,7 @@ def test_account_with_ledger_entries_is_refused_not_changed() -> None:
         site(live("Bank Charges - AB", "Bank Charges")),
         {"Bank Charges - AB"},
     )
-    assert not plan.renumbers
+    assert not plan.renames
     assert [r.reason for r in plan.refusals] == [RefusalReason.HAS_GL_ENTRIES]
     assert not plan.is_applyable
 
@@ -155,10 +155,53 @@ def test_renamed_account_keeping_its_number_is_renamed_not_recreated() -> None:
     )
     assert not plan.creates
     assert not plan.extras
-    assert [(r.live.document_name, r.desired.name) for r in plan.renumbers] == [
+    assert [(r.live.document_name, r.desired.name) for r in plan.renames] == [
         ("5219 - R&D Software - AB", "Research & Development Tools")
     ]
     assert plan.is_applyable
+
+
+def test_a_rename_that_keeps_its_number_is_not_a_renumber() -> None:
+    plan = diff(
+        chart(desired("5219", "Research & Development Tools")),
+        site(live("5219 - R&D Software - AB", "R&D Software", number="5219")),
+        set(),
+    )
+    (change,) = plan.renames
+    assert change.changes_name
+    assert not change.changes_number
+
+
+def test_a_renumber_that_keeps_its_name_is_not_a_rename() -> None:
+    plan = diff(
+        chart(desired("5202", "Bank Charges")),
+        site(live("5150 - Bank Charges - AB", "Bank Charges", number="5150")),
+        set(),
+    )
+    (change,) = plan.renames
+    assert change.changes_number
+    assert not change.changes_name
+
+
+def test_a_root_can_change_both_its_number_and_its_name() -> None:
+    # Roots are the only accounts where both move at once. Everything else is
+    # paired on one of the two, so whichever did the pairing still matches --
+    # a child changing both is not a rename at all, it is a create and an
+    # extra (test_changing_both_number_and_name_is_a_create_not_a_rename).
+    # A root is matched on root_type instead, which leaves both free.
+    #
+    # In practice this is the stock-site adoption path and nothing else. The
+    # five roots are what the accounting standard says they are, so moving one
+    # would mean the company had changed country and standard both -- IFRS
+    # instead of GAAP. That is a new chart, not an edit to this one.
+    plan = diff(
+        [DesiredAccount("1000", "Assets", None, True, "Asset", None)],
+        [LiveAccount("Application of Funds (Assets) - AB", "", "Application of Funds (Assets)", None, True, "Asset")],
+        set(),
+    )
+    (change,) = plan.renames
+    assert change.changes_number
+    assert change.changes_name
 
 
 def test_a_rename_does_not_collide_with_the_account_being_renamed() -> None:
@@ -186,7 +229,7 @@ def test_a_number_match_is_not_stolen_by_another_siblings_name() -> None:
         site(live("5203 - Bank Charges - AB", "Bank Charges", number="5203")),
         set(),
     )
-    assert [(r.live.document_name, r.desired.name) for r in plan.renumbers] == [
+    assert [(r.live.document_name, r.desired.name) for r in plan.renames] == [
         ("5203 - Bank Charges - AB", "Depreciation")
     ]
     assert [c.desired.number for c in plan.creates] == ["5202"]
@@ -223,7 +266,7 @@ def test_two_accounts_swapping_names_are_two_renames() -> None:
         set(),
     )
     assert not plan.creates and not plan.extras and not plan.refusals
-    assert {(r.live.document_name, r.desired.name) for r in plan.renumbers} == {
+    assert {(r.live.document_name, r.desired.name) for r in plan.renames} == {
         ("5110 - Development Hosting - AB", "Production Hosting"),
         ("5150 - Production Hosting - AB", "Development Hosting"),
     }
@@ -357,9 +400,9 @@ def test_renumber_and_retype_both_fire_for_the_same_account() -> None:
         site(live("Bank Charges - AB", "Bank Charges", account_type="Expense")),
         set(),
     )
-    assert [r.live.document_name for r in plan.renumbers] == ["Bank Charges - AB"]
+    assert [r.live.document_name for r in plan.renames] == ["Bank Charges - AB"]
     assert [r.live.document_name for r in plan.retypes] == ["Bank Charges - AB"]
-    assert plan.renumbers[0].desired.number == "5202"
+    assert plan.renames[0].desired.number == "5202"
     assert plan.retypes[0].desired.account_type == "Tax"
 
 
@@ -416,7 +459,7 @@ def test_a_sibling_holding_the_number_is_renamed_into_it_rather_than_refused() -
     )
     assert not plan.refusals
     assert not plan.creates
-    assert [(r.live.document_name, r.desired.name) for r in plan.renumbers] == [
+    assert [(r.live.document_name, r.desired.name) for r in plan.renames] == [
         ("5299 - Something Else - AB", "UNCATEGORISED")
     ]
 
@@ -445,7 +488,7 @@ def test_create_whose_number_is_vacated_by_a_renumber_in_the_same_plan_is_not_re
         set(),
     )
     assert [c.desired.number for c in plan.creates] == ["5299"]
-    assert [(r.live.document_name, r.desired.number) for r in plan.renumbers] == [("5299 - Old Category - AB", "5301")]
+    assert [(r.live.document_name, r.desired.number) for r in plan.renames] == [("5299 - Old Category - AB", "5301")]
     assert not plan.refusals
     assert plan.is_applyable
 
@@ -469,13 +512,13 @@ def test_renumbering_an_account_whose_number_another_chart_entry_takes_swaps_the
     )
     assert not plan.refusals
     assert [c.desired.number for c in plan.creates] == ["5301"]
-    assert [(r.live.document_name, r.desired.name) for r in plan.renumbers] == [
+    assert [(r.live.document_name, r.desired.name) for r in plan.renames] == [
         ("5299 - Old Category - AB", "UNCATEGORISED")
     ]
 
 
 def test_matched_account_keeping_its_own_number_is_not_reported_as_colliding_with_itself() -> None:
-    # A root matched by root_type but renamed still produces a RenumberAccount
+    # A root matched by root_type but renamed still produces a RenameAccount
     plan = diff(
         [DesiredAccount("1000", "Assets", None, True, "Asset", None)],
         [
@@ -490,7 +533,7 @@ def test_matched_account_keeping_its_own_number_is_not_reported_as_colliding_wit
         ],
         set(),
     )
-    assert [(r.live.document_name, r.desired.number) for r in plan.renumbers] == [
+    assert [(r.live.document_name, r.desired.number) for r in plan.renames] == [
         ("1000 - Application of Funds (Assets) - AB", "1000")
     ]
     assert not plan.refusals
@@ -563,7 +606,7 @@ def test_root_matches_by_root_type_even_when_the_name_differs() -> None:
     )
     assert not plan.creates
     assert not plan.extras
-    assert [(r.live.document_name, r.desired.number, r.desired.name) for r in plan.renumbers] == [
+    assert [(r.live.document_name, r.desired.number, r.desired.name) for r in plan.renames] == [
         ("Application of Funds (Assets) - AB", "1000", "Assets")
     ]
 
@@ -585,7 +628,7 @@ def test_a_child_of_a_renamed_root_matches_rather_than_duplicating() -> None:
     )
     assert [c.desired.number for c in plan.creates] == []
     assert [e.live.document_name for e in plan.extras] == []
-    assert {r.desired.number for r in plan.renumbers} == {"1000", "1100"}
+    assert {r.desired.number for r in plan.renames} == {"1000", "1100"}
 
 
 def test_a_root_type_with_no_live_root_is_refused_not_created() -> None:

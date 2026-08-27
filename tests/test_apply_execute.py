@@ -9,7 +9,7 @@ from stolon.apply.diff import (
     EnableAccount,
     Refusal,
     RefusalReason,
-    RenumberAccount,
+    RenameAccount,
     RetypeAccount,
 )
 from stolon.apply.execute import PlanRefusedError, apply_chart
@@ -45,7 +45,7 @@ class FakeClient:
 def test_a_refused_plan_is_not_executed_at_all() -> None:
     plan = ChartPlan(
         creates=[CreateAccount(desired("5299", "UNCATEGORISED"))],
-        renumbers=[],
+        renames=[],
         retypes=[],
         extras=[],
         refusals=[Refusal(("x", None), RefusalReason.HAS_GL_ENTRIES, "nope")],
@@ -63,7 +63,7 @@ def test_renumbers_run_before_creates() -> None:
     by_number = {"5200": parent, "5201": child}
     plan = ChartPlan(
         creates=[CreateAccount(child)],
-        renumbers=[RenumberAccount(live("Indirect - AB", "Indirect"), parent)],
+        renames=[RenameAccount(live("Indirect - AB", "Indirect"), parent)],
         retypes=[],
         extras=[],
         refusals=[],
@@ -79,7 +79,7 @@ def test_create_links_to_the_parents_post_renumber_name() -> None:
     child = desired("5201", "Advertising", parent="5200")
     plan = ChartPlan(
         creates=[CreateAccount(child)],
-        renumbers=[RenumberAccount(live("Indirect - AB", "Indirect"), parent)],
+        renames=[RenameAccount(live("Indirect - AB", "Indirect"), parent)],
         retypes=[],
         extras=[],
         refusals=[],
@@ -96,7 +96,7 @@ def test_creates_are_ordered_parents_first() -> None:
     leaf = desired("5201", "Advertising", parent="5200")
     plan = ChartPlan(
         creates=[CreateAccount(leaf), CreateAccount(root), CreateAccount(mid)],
-        renumbers=[],
+        renames=[],
         retypes=[],
         extras=[],
         refusals=[],
@@ -111,7 +111,7 @@ def test_renumber_uses_the_rpc_not_a_field_write() -> None:
     # Measured: a plain update does not move the document. update_account_number
     plan = ChartPlan(
         creates=[],
-        renumbers=[RenumberAccount(live("Bank Charges - AB", "Bank Charges"), desired("5202", "Bank Charges"))],
+        renames=[RenameAccount(live("Bank Charges - AB", "Bank Charges"), desired("5202", "Bank Charges"))],
         retypes=[],
         extras=[],
         refusals=[],
@@ -121,20 +121,20 @@ def test_renumber_uses_the_rpc_not_a_field_write() -> None:
     method, params = next(payload for kind, payload in client.actions if kind == "call")
     assert method == "erpnext.accounts.doctype.account.account.update_account_number"
     assert params == {"name": "Bank Charges - AB", "account_name": "Bank Charges", "account_number": "5202"}
-    assert report.renumbered == [("Bank Charges - AB", "5202 - Bank Charges - AB")]
+    assert report.renamed == [("Bank Charges - AB", "5202 - Bank Charges - AB")]
 
 
 def test_renumbers_run_in_dependency_order() -> None:
-    # Measured live: apply_chart ran plan.renumbers in plan order and died
-    current_assets = RenumberAccount(
+    # Measured live: apply_chart ran plan.renames in plan order and died
+    current_assets = RenameAccount(
         live("1100-1600 - Current Assets - AB", "Current Assets", "1100-1600"),
         desired("1100", "Current Assets", is_group=True),
     )
-    cash_in_hand = RenumberAccount(
+    cash_in_hand = RenameAccount(
         live("1100 - Cash In Hand - AB", "Cash In Hand", "1100"),
         desired("1120", "Cash In Hand"),
     )
-    plan = ChartPlan(creates=[], renumbers=[current_assets, cash_in_hand], retypes=[], extras=[], refusals=[])
+    plan = ChartPlan(creates=[], renames=[current_assets, cash_in_hand], retypes=[], extras=[], refusals=[])
     client = FakeClient()
     apply_chart(client, plan, [], {}, "AB", "Acmebike Cycling")
     call_names = [payload[1]["name"] for kind, payload in client.actions if kind == "call"]
@@ -143,9 +143,9 @@ def test_renumbers_run_in_dependency_order() -> None:
 
 def test_a_renumber_cycle_parks_before_either_renumber_runs() -> None:
     # A wants B's number and B wants A's -- neither can go first without
-    a = RenumberAccount(live("A - AB", "A", "10"), desired("20", "A"))
-    b = RenumberAccount(live("B - AB", "B", "20"), desired("10", "B"))
-    plan = ChartPlan(creates=[], renumbers=[a, b], retypes=[], extras=[], refusals=[])
+    a = RenameAccount(live("A - AB", "A", "10"), desired("20", "A"))
+    b = RenameAccount(live("B - AB", "B", "20"), desired("10", "B"))
+    plan = ChartPlan(creates=[], renames=[a, b], retypes=[], extras=[], refusals=[])
     client = FakeClient()
     report = apply_chart(client, plan, [], {}, "AB", "Acmebike Cycling")
 
@@ -159,14 +159,14 @@ def test_a_renumber_cycle_parks_before_either_renumber_runs() -> None:
     assert call_payloads[-1][1]["account_number"] == "20"
 
     assert report.parked == [("A - AB", "910", "910 - A - AB")]
-    assert report.renumbered == [("B - AB", "10 - B - AB"), ("A - AB", "20 - A - AB")]
+    assert report.renamed == [("B - AB", "10 - B - AB"), ("A - AB", "20 - A - AB")]
 
 
 def test_park_step_avoids_a_number_an_untouched_live_account_already_holds() -> None:
-    a = RenumberAccount(live("A - AB", "A", "10"), desired("20", "A"))
-    b = RenumberAccount(live("B - AB", "B", "20"), desired("10", "B"))
+    a = RenameAccount(live("A - AB", "A", "10"), desired("20", "A"))
+    b = RenameAccount(live("B - AB", "B", "20"), desired("10", "B"))
     bystander = live("Bystander - AB", "Bystander", "910")
-    plan = ChartPlan(creates=[], renumbers=[a, b], retypes=[], extras=[], refusals=[])
+    plan = ChartPlan(creates=[], renames=[a, b], retypes=[], extras=[], refusals=[])
     client = FakeClient()
     report = apply_chart(client, plan, [a.live, b.live, bystander], {}, "AB", "Acmebike Cycling")
 
@@ -177,8 +177,8 @@ def test_a_rename_carries_the_charts_name_not_just_its_number() -> None:
     # A root is matched by root_type, so the live name can be ERPNext's own
     plan = ChartPlan(
         creates=[],
-        renumbers=[
-            RenumberAccount(
+        renames=[
+            RenameAccount(
                 live("Application of Funds (Assets) - AB", "Application of Funds (Assets)"),
                 desired("1000", "Assets", is_group=True),
             )
@@ -195,13 +195,13 @@ def test_a_rename_carries_the_charts_name_not_just_its_number() -> None:
         "account_name": "Assets",
         "account_number": "1000",
     }
-    assert report.renumbered == [("Application of Funds (Assets) - AB", "1000 - Assets - AB")]
+    assert report.renamed == [("Application of Funds (Assets) - AB", "1000 - Assets - AB")]
 
 
 def test_retype_writes_only_the_account_type() -> None:
     plan = ChartPlan(
         creates=[],
-        renumbers=[],
+        renames=[],
         retypes=[RetypeAccount(live("2142 - X - AB", "X", "2142"), desired("2142", "X", account_type="Tax"))],
         extras=[],
         refusals=[],
@@ -216,7 +216,7 @@ def test_retype_writes_only_the_account_type() -> None:
 def test_enable_writes_only_disabled_zero() -> None:
     plan = ChartPlan(
         creates=[],
-        renumbers=[],
+        renames=[],
         retypes=[],
         extras=[],
         refusals=[],
@@ -233,12 +233,12 @@ def test_enable_writes_only_disabled_zero() -> None:
 
 
 def test_enable_uses_the_renamed_documents_current_name() -> None:
-    # An account can be both renumbered and re-enabled in the same run; the
+    # An account can be both renamed and re-enabled in the same run; the
     live_account = live("Old Name - AB", "Old Name", "10")
     desired_account = desired("20", "New Name")
     plan = ChartPlan(
         creates=[],
-        renumbers=[RenumberAccount(live_account, desired_account)],
+        renames=[RenameAccount(live_account, desired_account)],
         retypes=[],
         extras=[],
         refusals=[],
