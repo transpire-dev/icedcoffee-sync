@@ -247,18 +247,81 @@ class _Walk:
             self.enables.append(EnableAccount(have, want))
 
     def children(self, want: DesiredAccount, have: LiveAccount) -> None:
-        """Match a matched pair's children to each other by account name.
+        """Match a matched pair's children to each other, by number and then by name.
 
         Only this pair's own children are candidates -- keeps a renamed
         parent from stranding its subtree, and makes ambiguity a
         sibling-only concern rather than a chart-wide one.
-        """
-        available: dict[str, list[LiveAccount]] = {}
-        for child in self.live_children.get(have.document_name, []):
-            available.setdefault(child.name, []).append(child)
 
-        for kid in self.desired_children.get(want.number, []):
-            candidates = available.get(kid.name, [])
+        **Number first.** In a chart of accounts the number is the account's
+        identity and the name is a label on it: the chart file is keyed on
+        number, ERPNext enforces one account per number per company, and the
+        GL codes our bank shows are those numbers. So an account whose name
+        the chart rewrites is the same account, and matching it by name would
+        make it a create beside the original -- which then collides with the
+        number the original still holds, and the plan refuses the very change
+        it was asked to make.
+
+        **Name second**, for the live accounts a number cannot reach: the
+        stock chart a wizard site starts with carries no numbers at all, so
+        number-only matching would strand every one of them and re-create the
+        chart alongside itself.
+
+        Two passes rather than one loop, so a name cannot claim a sibling
+        that some later chart entry owns by number. A number match is never
+        ambiguous the way a name match is, which is also why a number match
+        settles what would otherwise be two same-named siblings.
+        """
+        siblings = self.live_children.get(have.document_name, [])
+        kids = self.desired_children.get(want.number, [])
+
+        counterparts: list[LiveAccount | None] = [None] * len(kids)
+        taken: set[str] = set()
+        self._claim_by_number(kids, siblings, counterparts, taken)
+        refused = self._claim_by_name(kids, siblings, counterparts, taken, have)
+
+        for index, kid in enumerate(kids):
+            if index in refused:
+                continue
+            counterpart = counterparts[index]
+            if counterpart is None:
+                self.create(kid)
+            else:
+                self.pair(kid, counterpart)
+
+    @staticmethod
+    def _claim_by_number(
+        kids: list[DesiredAccount],
+        siblings: list[LiveAccount],
+        counterparts: list[LiveAccount | None],
+        taken: set[str],
+    ) -> None:
+        """Pair each chart entry with the sibling already holding its number."""
+        by_number = {child.number: child for child in siblings if child.number}
+        for index, kid in enumerate(kids):
+            match = by_number.get(kid.number)
+            if match is not None:
+                counterparts[index] = match
+                taken.add(match.document_name)
+
+    def _claim_by_name(
+        self,
+        kids: list[DesiredAccount],
+        siblings: list[LiveAccount],
+        counterparts: list[LiveAccount | None],
+        taken: set[str],
+        have: LiveAccount,
+    ) -> set[int]:
+        """Pair what the numbers left over, by name. Returns the indices refused as ambiguous."""
+        by_name: dict[str, list[LiveAccount]] = {}
+        for child in siblings:
+            by_name.setdefault(child.name, []).append(child)
+
+        refused: set[int] = set()
+        for index, kid in enumerate(kids):
+            if counterparts[index] is not None:
+                continue
+            candidates = [c for c in by_name.get(kid.name, []) if c.document_name not in taken]
             if len(candidates) > 1:
                 found = ", ".join(c.document_name for c in candidates)
                 self.refuse(
@@ -268,10 +331,12 @@ class _Walk:
                     candidates,
                 )
                 self.consume(candidates)
+                taken.update(c.document_name for c in candidates)
+                refused.add(index)
             elif candidates:
-                self.pair(kid, candidates[0])
-            else:
-                self.create(kid)
+                counterparts[index] = candidates[0]
+                taken.add(candidates[0].document_name)
+        return refused
 
     def number_collisions(self, live: list[LiveAccount]) -> None:
         """Refuse any create or renumber that would land on a number a live account still holds.

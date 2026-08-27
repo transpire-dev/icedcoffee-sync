@@ -147,6 +147,112 @@ def test_untouched_account_with_ledger_entries_is_not_refused() -> None:
     assert plan.is_applyable
 
 
+def test_renamed_account_keeping_its_number_is_renamed_not_recreated() -> None:
+    plan = diff(
+        chart(desired("5219", "Research & Development Tools")),
+        site(live("5219 - R&D Software - AB", "R&D Software", number="5219")),
+        set(),
+    )
+    assert not plan.creates
+    assert not plan.extras
+    assert [(r.live.document_name, r.desired.name) for r in plan.renumbers] == [
+        ("5219 - R&D Software - AB", "Research & Development Tools")
+    ]
+    assert plan.is_applyable
+
+
+def test_a_rename_does_not_collide_with_the_account_being_renamed() -> None:
+    # The failure this whole fallback exists to stop: an unmatched rename became
+    # a create, the old account stayed behind holding the number, and the create
+    # refused against it. The plan then said "impossible" about its own subject.
+    plan = diff(
+        chart(desired("5216", "Travel, Conferences & Professional Development")),
+        site(live("5216 - Travel & Conference Expenses - AB", "Travel & Conference Expenses", number="5216")),
+        set(),
+    )
+    assert not plan.refusals
+    assert plan.is_applyable
+
+
+def test_a_number_match_is_not_stolen_by_another_siblings_name() -> None:
+    # 5203 owns the live 5203 whatever it is currently called, so the name
+    # pass must not hand that same account to 5202 on the strength of its
+    # name. One loop matching name-then-number in chart order would.
+    plan = diff(
+        chart(
+            desired("5203", "Depreciation"),
+            desired("5202", "Bank Charges"),
+        ),
+        site(live("5203 - Bank Charges - AB", "Bank Charges", number="5203")),
+        set(),
+    )
+    assert [(r.live.document_name, r.desired.name) for r in plan.renumbers] == [
+        ("5203 - Bank Charges - AB", "Depreciation")
+    ]
+    assert [c.desired.number for c in plan.creates] == ["5202"]
+
+
+def test_a_number_match_settles_two_siblings_sharing_a_name() -> None:
+    # Same name twice is ambiguous only when nothing better is available. The
+    # number says which one is meant, so this is a match rather than a refusal.
+    plan = diff(
+        chart(desired("5202", "Bank Charges")),
+        site(
+            live("5202 - Bank Charges - AB", "Bank Charges", number="5202"),
+            live("Bank Charges - AB", "Bank Charges"),
+        ),
+        set(),
+    )
+    assert not plan.refusals
+    assert [e.live.document_name for e in plan.extras] == ["Bank Charges - AB"]
+
+
+def test_two_accounts_swapping_names_are_two_renames() -> None:
+    # Number-first makes this the obvious thing: each account keeps its number
+    # and takes its new name. Matching on name would swap the numbers instead,
+    # renumbering two accounts to say what renaming them says.
+    plan = diff(
+        chart(
+            desired("5110", "Production Hosting"),
+            desired("5150", "Development Hosting"),
+        ),
+        site(
+            live("5110 - Development Hosting - AB", "Development Hosting", number="5110"),
+            live("5150 - Production Hosting - AB", "Production Hosting", number="5150"),
+        ),
+        set(),
+    )
+    assert not plan.creates and not plan.extras and not plan.refusals
+    assert {(r.live.document_name, r.desired.name) for r in plan.renumbers} == {
+        ("5110 - Development Hosting - AB", "Production Hosting"),
+        ("5150 - Production Hosting - AB", "Development Hosting"),
+    }
+
+
+def test_renaming_an_account_with_ledger_entries_is_refused_not_duplicated() -> None:
+    # Before the number fallback this was a silent create beside the account
+    # with the history, which is the worst available outcome.
+    plan = diff(
+        chart(desired("5219", "Research & Development Tools")),
+        site(live("5219 - R&D Software - AB", "R&D Software", number="5219")),
+        {"5219 - R&D Software - AB"},
+    )
+    assert [r.reason for r in plan.refusals] == [RefusalReason.HAS_GL_ENTRIES]
+    assert not plan.creates
+
+
+def test_changing_both_number_and_name_is_a_create_not_a_rename() -> None:
+    # Neither key survives, so there is nothing tying the two together and
+    # guessing would be worse than creating. The old account is an extra.
+    plan = diff(
+        chart(desired("5230", "Something Else")),
+        site(live("5219 - R&D Software - AB", "R&D Software", number="5219")),
+        set(),
+    )
+    assert [c.desired.number for c in plan.creates] == ["5230"]
+    assert [e.live.document_name for e in plan.extras] == ["5219 - R&D Software - AB"]
+
+
 def test_two_live_siblings_sharing_a_name_are_refused() -> None:
     plan = diff(
         chart(desired("5202", "Bank Charges")),
@@ -270,10 +376,26 @@ def test_refusal_detail_names_the_account_and_the_conflict() -> None:
 # --- number collisions -------------------------------------------------------
 
 
-def test_create_whose_number_is_held_by_unrelated_live_account_is_refused() -> None:
+def test_create_whose_number_is_held_under_another_parent_is_refused() -> None:
+    # Matching is sibling-local, so a number held somewhere else in the tree is
+    # out of its reach: the chart's 5299 is a create, and only this check sees
+    # the account already sitting on that number under a different parent.
     plan = diff(
-        chart(desired("5299", "UNCATEGORISED")),
-        site(live("5299 - Something Else - AB", "Something Else", number="5299")),
+        chart(
+            desired("5100", "Direct Costs", is_group=True),
+            desired("5299", "UNCATEGORISED", parent="5100"),
+            desired("5200", "Indirect Expenses", is_group=True),
+        ),
+        site(
+            live("5100 - Direct Costs - AB", "Direct Costs", number="5100", is_group=True),
+            live("5200 - Indirect Expenses - AB", "Indirect Expenses", number="5200", is_group=True),
+            live(
+                "5299 - Something Else - AB",
+                "Something Else",
+                number="5299",
+                parent="5200 - Indirect Expenses - AB",
+            ),
+        ),
         set(),
     )
     assert [r.reason for r in plan.refusals] == [RefusalReason.NUMBER_COLLISION]
@@ -283,8 +405,60 @@ def test_create_whose_number_is_held_by_unrelated_live_account_is_refused() -> N
     assert not plan.is_applyable
 
 
+def test_a_sibling_holding_the_number_is_renamed_into_it_rather_than_refused() -> None:
+    # The same shape as the test above, one parent instead of two -- and the
+    # opposite outcome, because within a parent the number reaches the account
+    # and says it is the same one. This is what makes a chart rename appliable.
+    plan = diff(
+        chart(desired("5299", "UNCATEGORISED")),
+        site(live("5299 - Something Else - AB", "Something Else", number="5299")),
+        set(),
+    )
+    assert not plan.refusals
+    assert not plan.creates
+    assert [(r.live.document_name, r.desired.name) for r in plan.renumbers] == [
+        ("5299 - Something Else - AB", "UNCATEGORISED")
+    ]
+
+
 def test_create_whose_number_is_vacated_by_a_renumber_in_the_same_plan_is_not_refused() -> None:
-    # The live account currently sitting on 5299 is itself being renumbered to
+    # "Old Category" moves to another group and takes 5301 with it, freeing
+    # 5299 for the new account in the group it left. Without the vacated-number
+    # exemption a valid plan like this would refuse itself forever.
+    plan = diff(
+        chart(
+            desired("5100", "Direct Costs", is_group=True),
+            desired("5301", "Old Category", parent="5100"),
+            desired("5200", "Indirect Expenses", is_group=True),
+            desired("5299", "UNCATEGORISED", parent="5200"),
+        ),
+        site(
+            live("5100 - Direct Costs - AB", "Direct Costs", number="5100", is_group=True),
+            live(
+                "5299 - Old Category - AB",
+                "Old Category",
+                number="5299",
+                parent="5100 - Direct Costs - AB",
+            ),
+            live("5200 - Indirect Expenses - AB", "Indirect Expenses", number="5200", is_group=True),
+        ),
+        set(),
+    )
+    assert [c.desired.number for c in plan.creates] == ["5299"]
+    assert [(r.live.document_name, r.desired.number) for r in plan.renumbers] == [("5299 - Old Category - AB", "5301")]
+    assert not plan.refusals
+    assert plan.is_applyable
+
+
+def test_renumbering_an_account_whose_number_another_chart_entry_takes_swaps_the_documents() -> None:
+    # The cost of number-first, pinned deliberately. Asked to move "Old
+    # Category" to 5301 and put a new account on the 5299 it leaves behind --
+    # within one parent -- the diff reads 5299 as "the account numbered 5299"
+    # and renames it, creating "Old Category" fresh at 5301. The end state is
+    # the chart either way; only which document carries which identity differs,
+    # and that is immaterial for an account with no entries. One with entries
+    # is refused (HAS_GL_ENTRIES) rather than reinterpreted, which is what
+    # keeps this a curiosity rather than a hazard.
     plan = diff(
         chart(
             desired("5301", "Old Category"),
@@ -293,10 +467,11 @@ def test_create_whose_number_is_vacated_by_a_renumber_in_the_same_plan_is_not_re
         site(live("5299 - Old Category - AB", "Old Category", number="5299")),
         set(),
     )
-    assert [c.desired.number for c in plan.creates] == ["5299"]
-    assert [(r.live.document_name, r.desired.number) for r in plan.renumbers] == [("5299 - Old Category - AB", "5301")]
     assert not plan.refusals
-    assert plan.is_applyable
+    assert [c.desired.number for c in plan.creates] == ["5301"]
+    assert [(r.live.document_name, r.desired.name) for r in plan.renumbers] == [
+        ("5299 - Old Category - AB", "UNCATEGORISED")
+    ]
 
 
 def test_matched_account_keeping_its_own_number_is_not_reported_as_colliding_with_itself() -> None:
@@ -322,12 +497,26 @@ def test_matched_account_keeping_its_own_number_is_not_reported_as_colliding_wit
     assert plan.is_applyable
 
 
-def test_renumber_whose_target_number_is_held_by_unrelated_live_account_is_refused() -> None:
+def test_renumber_whose_target_number_is_held_under_another_parent_is_refused() -> None:
+    # The unnumbered stock "Payroll" is matched by name and numbered 5210 --
+    # but 5210 is already taken, in a part of the tree the sibling-local match
+    # never looked at.
     plan = diff(
-        chart(desired("5210", "Payroll")),
+        chart(
+            desired("5100", "Direct Costs", is_group=True),
+            desired("5210", "Payroll", parent="5100"),
+            desired("5200", "Indirect Expenses", is_group=True),
+        ),
         site(
-            live("Payroll - AB", "Payroll"),
-            live("5210 - Something Else - AB", "Something Else", number="5210"),
+            live("5100 - Direct Costs - AB", "Direct Costs", number="5100", is_group=True),
+            live("Payroll - AB", "Payroll", parent="5100 - Direct Costs - AB"),
+            live("5200 - Indirect Expenses - AB", "Indirect Expenses", number="5200", is_group=True),
+            live(
+                "5210 - Something Else - AB",
+                "Something Else",
+                number="5210",
+                parent="5200 - Indirect Expenses - AB",
+            ),
         ),
         set(),
     )
@@ -341,10 +530,21 @@ def test_number_collision_refusal_makes_the_whole_plan_unapplyable() -> None:
     # A single collision blocks the plan even when everything else in it is
     plan = diff(
         chart(
-            desired("5299", "UNCATEGORISED"),
-            desired("5301", "Legit New Account"),
+            desired("5100", "Direct Costs", is_group=True),
+            desired("5299", "UNCATEGORISED", parent="5100"),
+            desired("5301", "Legit New Account", parent="5100"),
+            desired("5200", "Indirect Expenses", is_group=True),
         ),
-        site(live("5299 - Something Else - AB", "Something Else", number="5299")),
+        site(
+            live("5100 - Direct Costs - AB", "Direct Costs", number="5100", is_group=True),
+            live("5200 - Indirect Expenses - AB", "Indirect Expenses", number="5200", is_group=True),
+            live(
+                "5299 - Something Else - AB",
+                "Something Else",
+                number="5299",
+                parent="5200 - Indirect Expenses - AB",
+            ),
+        ),
         set(),
     )
     assert {c.desired.number for c in plan.creates} == {"5299", "5301"}
