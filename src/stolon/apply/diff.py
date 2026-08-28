@@ -39,11 +39,30 @@ class CreateAccount:
 
 
 @dataclasses.dataclass(frozen=True)
-class RenumberAccount:
-    """A matched account whose number or name differs. Executed as a rename."""
+class RenameAccount:
+    """A matched account whose number or name differs.
+
+    One bucket for both because ERPNext names a document
+    `{number} - {name} - {abbr}`: changing either field is the same single
+    rename call, and ordering them is the same problem either way.
+
+    They are not the same thing to a person, though, so `changes_number` and
+    `changes_name` tell them apart. A renumber moves the GL code the bank
+    shows against every transaction; a rename only changes the label on it.
+    """
 
     live: LiveAccount
     desired: DesiredAccount
+
+    @property
+    def changes_number(self) -> bool:
+        """True when the account's number moves."""
+        return self.live.number != self.desired.number
+
+    @property
+    def changes_name(self) -> bool:
+        """True when the account's name changes."""
+        return self.live.name != self.desired.name
 
 
 @dataclasses.dataclass(frozen=True)
@@ -99,7 +118,7 @@ class ChartPlan:
     """
 
     creates: list[CreateAccount]
-    renumbers: list[RenumberAccount]
+    renames: list[RenameAccount]
     retypes: list[RetypeAccount]
     extras: list[ExtraAccount]
     refusals: list[Refusal]
@@ -113,7 +132,7 @@ class ChartPlan:
     @property
     def is_empty(self) -> bool:
         """True when the site already matches the chart."""
-        return not (self.creates or self.renumbers or self.retypes or self.enables)
+        return not (self.creates or self.renames or self.retypes or self.enables)
 
 
 def diff(
@@ -146,7 +165,7 @@ def diff(
     walk.roots()
     walk.number_collisions(live)
     extras = [ExtraAccount(a) for a in live if a.document_name not in walk.matched]
-    return ChartPlan(walk.creates, walk.renumbers, walk.retypes, extras, walk.refusals, walk.enables)
+    return ChartPlan(walk.creates, walk.renames, walk.retypes, extras, walk.refusals, walk.enables)
 
 
 @dataclasses.dataclass
@@ -158,7 +177,7 @@ class _Walk:
     desired_children: dict[str | None, list[DesiredAccount]]
     live_children: dict[str | None, list[LiveAccount]]
     creates: list[CreateAccount] = dataclasses.field(default_factory=list)
-    renumbers: list[RenumberAccount] = dataclasses.field(default_factory=list)
+    renames: list[RenameAccount] = dataclasses.field(default_factory=list)
     retypes: list[RetypeAccount] = dataclasses.field(default_factory=list)
     enables: list[EnableAccount] = dataclasses.field(default_factory=list)
     refusals: list[Refusal] = dataclasses.field(default_factory=list)
@@ -240,25 +259,141 @@ class _Walk:
             return
 
         if wants_rename:
-            self.renumbers.append(RenumberAccount(have, want))
+            self.renames.append(RenameAccount(have, want))
         if wants_retype:
             self.retypes.append(RetypeAccount(have, want))
         if have.disabled:
             self.enables.append(EnableAccount(have, want))
 
     def children(self, want: DesiredAccount, have: LiveAccount) -> None:
-        """Match a matched pair's children to each other by account name.
+        """Match a matched pair's children to each other, by number and then by name.
 
         Only this pair's own children are candidates -- keeps a renamed
         parent from stranding its subtree, and makes ambiguity a
         sibling-only concern rather than a chart-wide one.
-        """
-        available: dict[str, list[LiveAccount]] = {}
-        for child in self.live_children.get(have.document_name, []):
-            available.setdefault(child.name, []).append(child)
 
-        for kid in self.desired_children.get(want.number, []):
-            candidates = available.get(kid.name, [])
+        **Number first.** In a chart of accounts the number is the account's
+        identity and the name is a label on it: the chart file is keyed on
+        number, ERPNext enforces one account per number per company, and the
+        GL codes our bank shows are those numbers. So an account whose name
+        the chart rewrites is the same account, and matching it by name would
+        make it a create beside the original -- which then collides with the
+        number the original still holds, and the plan refuses the very change
+        it was asked to make.
+
+        **Name second**, for the live accounts a number cannot reach: the
+        stock chart a wizard site starts with carries no numbers at all, so
+        number-only matching would strand every one of them and re-create the
+        chart alongside itself.
+
+        Two passes rather than one loop, so a name cannot claim a sibling
+        that some later chart entry owns by number. A number match is never
+        ambiguous the way a name match is, which is also why a number match
+        settles what would otherwise be two same-named siblings.
+        """
+        siblings = self.live_children.get(have.document_name, [])
+        kids = self.desired_children.get(want.number, [])
+
+        counterparts: list[LiveAccount | None] = [None] * len(kids)
+        taken: set[str] = set()
+        self._claim_by_number(kids, siblings, counterparts, taken)
+        refused = self._refuse_contested_claims(kids, siblings, counterparts, have)
+        refused |= self._claim_by_name(kids, siblings, counterparts, taken, have, refused)
+
+        for index, kid in enumerate(kids):
+            if index in refused:
+                continue
+            counterpart = counterparts[index]
+            if counterpart is None:
+                self.create(kid)
+            else:
+                self.pair(kid, counterpart)
+
+    @staticmethod
+    def _claim_by_number(
+        kids: list[DesiredAccount],
+        siblings: list[LiveAccount],
+        counterparts: list[LiveAccount | None],
+        taken: set[str],
+    ) -> None:
+        """Pair each chart entry with the sibling already holding its number."""
+        by_number = {child.number: child for child in siblings if child.number}
+        for index, kid in enumerate(kids):
+            match = by_number.get(kid.number)
+            if match is not None:
+                counterparts[index] = match
+                taken.add(match.document_name)
+
+    def _refuse_contested_claims(
+        self,
+        kids: list[DesiredAccount],
+        siblings: list[LiveAccount],
+        counterparts: list[LiveAccount | None],
+        have: LiveAccount,
+    ) -> set[int]:
+        """Refuse where one chart entry owns a live account by number and another names it.
+
+        The signature of an identity swap: the chart moves an account to a new
+        number while a different entry takes the number it left, and both point
+        at the same live document. Preferring the number silently repurposes
+        it -- and while the GL-entry guard stops that for an account with
+        ledger history, an *empty* account can still be linked from Bank
+        Account records, tax templates or the Company defaults, and every one
+        of those links follows the rename to the wrong account.
+
+        Which of the two readings the author meant is genuinely unknowable
+        here, so this refuses instead of guessing. Splitting the change across
+        two applies resolves it.
+
+        A swap of names between two accounts that each keep their number is
+        not this: there the contested account is claimed by number too, and
+        both entries end up where they belong.
+        """
+        claimed_by_number = {
+            counterpart.document_name: index for index, counterpart in enumerate(counterparts) if counterpart
+        }
+        refused: set[int] = set()
+        for index, kid in enumerate(kids):
+            if counterparts[index] is not None:
+                continue
+            for sibling in siblings:
+                if sibling.name != kid.name:
+                    continue
+                owner = claimed_by_number.get(sibling.document_name)
+                if owner is None or owner == index:
+                    continue
+                self.refuse(
+                    kid,
+                    RefusalReason.AMBIGUOUS_MATCH,
+                    f"chart {kid.number} {kid.name!r} matches {sibling.document_name} by name, but chart "
+                    f"{kids[owner].number} already claims it by number; apply the renumber and the "
+                    f"reuse of its old number as two separate changes",
+                    [sibling],
+                )
+                self.consume([sibling])
+                refused.add(index)
+                break
+        return refused
+
+    def _claim_by_name(
+        self,
+        kids: list[DesiredAccount],
+        siblings: list[LiveAccount],
+        counterparts: list[LiveAccount | None],
+        taken: set[str],
+        have: LiveAccount,
+        already_refused: set[int],
+    ) -> set[int]:
+        """Pair what the numbers left over, by name. Returns the indices refused as ambiguous."""
+        by_name: dict[str, list[LiveAccount]] = {}
+        for child in siblings:
+            by_name.setdefault(child.name, []).append(child)
+
+        refused: set[int] = set()
+        for index, kid in enumerate(kids):
+            if counterparts[index] is not None or index in already_refused:
+                continue
+            candidates = [c for c in by_name.get(kid.name, []) if c.document_name not in taken]
             if len(candidates) > 1:
                 found = ", ".join(c.document_name for c in candidates)
                 self.refuse(
@@ -268,18 +403,20 @@ class _Walk:
                     candidates,
                 )
                 self.consume(candidates)
+                taken.update(c.document_name for c in candidates)
+                refused.add(index)
             elif candidates:
-                self.pair(kid, candidates[0])
-            else:
-                self.create(kid)
+                counterparts[index] = candidates[0]
+                taken.add(candidates[0].document_name)
+        return refused
 
     def number_collisions(self, live: list[LiveAccount]) -> None:
         """Refuse any create or renumber that would land on a number a live account still holds.
 
         Not local to a matched pair, unlike `reconcile`'s checks: the
         contested account can be anywhere in the tree. Checked against the
-        state *after* this plan's own renumbers land -- `apply_chart` runs
-        renumbers before creates, so a number this plan itself vacates is
+        state *after* this plan's own renames land -- `apply_chart` runs
+        renames before creates, so a number this plan itself vacates is
         not a collision, or a valid renumbering plan would refuse itself
         forever.
 
@@ -288,7 +425,7 @@ class _Walk:
                 contested account may be one this walk never visited.
         """
         live_by_number = {a.number: a for a in live if a.number}
-        vacated = {r.live.number for r in self.renumbers if r.live.number and r.live.number != r.desired.number}
+        vacated = {r.live.number for r in self.renames if r.live.number and r.live.number != r.desired.number}
 
         def check(want: DesiredAccount, counterpart: LiveAccount | None) -> None:
             if not want.number or want.number in vacated:
@@ -308,7 +445,7 @@ class _Walk:
 
         for change in self.creates:
             check(change.desired, None)
-        for change in self.renumbers:
+        for change in self.renames:
             check(change.desired, change.live)
 
     def create(self, want: DesiredAccount) -> None:

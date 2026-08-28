@@ -5,14 +5,14 @@ must exist first: creates run shallowest-first, and every renumber runs
 before any create. Renumbers also need their own order among themselves --
 measured live, "Current Assets" taking 1100 before "Cash In Hand" vacated it
 died with "number already used", a collision `ChartPlan` deliberately leaves
-for `order_renumbers` to resolve rather than refusing outright.
+for `order_renames` to resolve rather than refusing outright.
 """
 
 from __future__ import annotations
 
 import dataclasses
 
-from stolon.apply.diff import CreateAccount, RenumberAccount
+from stolon.apply.diff import CreateAccount, RenameAccount
 from stolon.apply.model import DesiredAccount, LiveAccount
 from stolon.apply.park import _next_candidate
 
@@ -51,13 +51,13 @@ class ParkStep:
     temporary_number: str
 
 
-type RenumberStep = RenumberAccount | ParkStep
+type RenameStep = RenameAccount | ParkStep
 
 
-def order_renumbers(
-    renumbers: list[RenumberAccount], chart_numbers: frozenset[str], taken: frozenset[str]
-) -> list[RenumberStep]:
-    """Order renumbers so none tries to claim a number still occupied by another.
+def order_renames(
+    renames: list[RenameAccount], chart_numbers: frozenset[str], taken: frozenset[str]
+) -> list[RenameStep]:
+    """Order renames so none tries to claim a number still occupied by another.
 
     Renumber X depends on renumber Y when `X.desired.number ==
     Y.live.number`; `ChartPlan` deliberately leaves that unrefused, so a
@@ -70,16 +70,16 @@ def order_renumbers(
             this plan does not touch.
 
     Returns:
-        `renumbers`, reordered, with a `ParkStep` wherever a cycle was broken.
+        `renames`, reordered, with a `ParkStep` wherever a cycle was broken.
     """
-    n = len(renumbers)
-    dependents, remaining = _dependency_graph(renumbers)
+    n = len(renames)
+    dependents, remaining = _dependency_graph(renames)
     avoid = taken | chart_numbers
 
     done: set[int] = set()
     vacated: set[int] = set()
     parked_at: set[str] = set()
-    steps: list[RenumberStep] = []
+    steps: list[RenameStep] = []
 
     def _next_ready() -> int | None:
         return next((i for i in range(n) if i not in done and remaining[i] == 0), None)
@@ -92,26 +92,26 @@ def order_renumbers(
     while len(done) < n:
         ready = _next_ready()
         if ready is not None:
-            steps.append(renumbers[ready])
+            steps.append(renames[ready])
             done.add(ready)
             _vacate(ready)
             continue
 
         # A cycle: park the lowest-indexed unvacated member to free its number.
         to_park = next(i for i in range(n) if i not in vacated)
-        candidate = _unused_number(renumbers[to_park].live.number, avoid | parked_at)
+        candidate = _unused_number(renames[to_park].live.number, avoid | parked_at)
         parked_at.add(candidate)
-        steps.append(ParkStep(renumbers[to_park].live, candidate))
+        steps.append(ParkStep(renames[to_park].live, candidate))
         _vacate(to_park)
 
     return steps
 
 
-def _dependency_graph(renumbers: list[RenumberAccount]) -> tuple[list[set[int]], list[int]]:
-    """Which renumbers must run before which, and how many each is still waiting on."""
-    n = len(renumbers)
+def _dependency_graph(renames: list[RenameAccount]) -> tuple[list[set[int]], list[int]]:
+    """Which renames must run before which, and how many each is still waiting on."""
+    n = len(renames)
     depends_on = [
-        {j for j in range(n) if j != i and renumbers[i].desired.number == renumbers[j].live.number} for i in range(n)
+        {j for j in range(n) if j != i and renames[i].desired.number == renames[j].live.number} for i in range(n)
     ]
     dependents: list[set[int]] = [set() for _ in range(n)]
     for i, deps in enumerate(depends_on):

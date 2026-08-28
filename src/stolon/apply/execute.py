@@ -7,8 +7,8 @@ first would link a child to a name about to stop existing.
 Renumbers need their own order among themselves too -- measured live,
 renumbering "Current Assets" to 1100 before "Cash In Hand" (still sitting on
 1100) vacated it died with a plain "number already used" error.
-`stolon.apply.order.order_renumbers` works out that order, inserting a park
-step onto a temporary number when two or more renumbers form a genuine cycle.
+`stolon.apply.order.order_renames` works out that order, inserting a park
+step onto a temporary number when two or more renames form a genuine cycle.
 """
 
 from __future__ import annotations
@@ -16,9 +16,9 @@ from __future__ import annotations
 import dataclasses
 from typing import Any, Protocol
 
-from stolon.apply.diff import ChartPlan, RenumberAccount
+from stolon.apply.diff import ChartPlan, RenameAccount
 from stolon.apply.model import DesiredAccount, LiveAccount
-from stolon.apply.order import ParkStep, order_creates, order_renumbers
+from stolon.apply.order import ParkStep, order_creates, order_renames
 from stolon.erpnext.accounts import document_name
 
 RENUMBER_METHOD = "erpnext.accounts.doctype.account.account.update_account_number"
@@ -38,32 +38,32 @@ class _Writer(Protocol):
 class ApplyReport:
     """What actually happened, for printing back to the operator.
 
-    `parked` is every account `order_renumbers` moved out of the way to
-    break a renumbering cycle -- distinct from `renumbered`, the moves the
-    chart wanted. A parked account's real renumber still lands in `renumbered` too.
+    `parked` is every account `order_renames` moved out of the way to
+    break a renumbering cycle -- distinct from `renamed`, the moves the
+    chart wanted. A parked account's real renumber still lands in `renamed` too.
     """
 
     created: list[str] = dataclasses.field(default_factory=list)
-    renumbered: list[tuple[str, str]] = dataclasses.field(default_factory=list)
+    renamed: list[tuple[str, str]] = dataclasses.field(default_factory=list)
     parked: list[tuple[str, str, str]] = dataclasses.field(default_factory=list)
     retyped: list[str] = dataclasses.field(default_factory=list)
     enabled: list[str] = dataclasses.field(default_factory=list)
 
 
-def _execute_renumbers(
+def _execute_renames(
     client: _Writer,
-    renumbers: list[RenumberAccount],
+    renames: list[RenameAccount],
     abbr: str,
     report: ApplyReport,
     chart_numbers: frozenset[str],
     taken: frozenset[str],
 ) -> dict[str, str]:
-    """Run every renumber, and any park step `order_renumbers` had to insert, in order.
+    """Run every renumber, and any park step `order_renames` had to insert, in order.
 
     A parked account's document name changes twice -- to its temporary
-    number, then its real one -- so `current_name` tracks each renumbered
+    number, then its real one -- so `current_name` tracks each renamed
     account's *current* document name (keyed by its original one) rather
-    than trusting `RenumberAccount.live.document_name`, which only ever
+    than trusting `RenameAccount.live.document_name`, which only ever
     holds the pre-run name.
 
     Returns:
@@ -76,7 +76,7 @@ def _execute_renumbers(
     def name_of(live: LiveAccount) -> str:
         return current_name.get(live.document_name, live.document_name)
 
-    for step in order_renumbers(renumbers, chart_numbers, taken):
+    for step in order_renames(renames, chart_numbers, taken):
         if isinstance(step, ParkStep):
             new_name = client.call(
                 RENUMBER_METHOD,
@@ -105,7 +105,7 @@ def _execute_renumbers(
         )
         new_name = str(new_name) if new_name else document_name(step.desired.name, abbr, step.desired.number)
         resolved[step.desired.number] = new_name
-        report.renumbered.append((step.live.document_name, new_name))
+        report.renamed.append((step.live.document_name, new_name))
 
     return resolved
 
@@ -133,7 +133,7 @@ def apply_chart(
 
     `live` is the whole pre-diff live chart, not just the accounts `plan`
     singles out: an account `plan` never mentions can still already hold a
-    number `order_renumbers` might otherwise pick to park something onto.
+    number `order_renames` might otherwise pick to park something onto.
     """
     if plan.refusals:
         reasons = ", ".join(sorted({r.reason.value for r in plan.refusals}))
@@ -142,7 +142,7 @@ def apply_chart(
     chart_numbers = frozenset(by_number)
     taken = frozenset(a.number for a in live if a.number)
     report = ApplyReport()
-    resolved = _execute_renumbers(client, plan.renumbers, abbr, report, chart_numbers, taken)
+    resolved = _execute_renames(client, plan.renames, abbr, report, chart_numbers, taken)
 
     for change in order_creates(plan.creates, by_number):
         want = change.desired
