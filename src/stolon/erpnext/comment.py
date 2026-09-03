@@ -11,6 +11,7 @@ is checked before adding one.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any, Protocol
 
 ADD_COMMENT = "frappe.desk.form.utils.add_comment"
@@ -21,7 +22,7 @@ DEFAULT_BY = "Transpire"
 
 class _Caller(Protocol):
     def call(self, dotted_path: str, params: dict[str, Any] | None = None) -> Any: ...
-    def list(self, doctype: str, **kwargs: Any) -> Any: ...
+    def iter_all(self, doctype: str, **kwargs: Any) -> Iterable[dict[str, Any]]: ...
 
 
 def add_comment(
@@ -47,10 +48,15 @@ def add_comment(
 
 
 def list_comments(client: _Caller, doctype: str, name: str) -> list[dict[str, Any]]:
-    """Every "Comment"-type Comment on the document, with its content."""
-    return client.list(
-        DOCTYPE_COMMENT,
-        fields=["name", "content", "comment_email", "creation"],
-        filters={"reference_doctype": doctype, "reference_name": name, "comment_type": "Comment"},
-        limit=1000,
+    """Every "Comment"-type Comment on the document, with its content.
+
+    Pages to the end: a busy document's comment history outgrows any one page,
+    and a truncated read is what makes an already-posted comment look absent.
+    """
+    return list(
+        client.iter_all(
+            DOCTYPE_COMMENT,
+            fields=["name", "content", "comment_email", "creation"],
+            filters={"reference_doctype": doctype, "reference_name": name, "comment_type": "Comment"},
+        )
     )

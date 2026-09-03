@@ -14,9 +14,9 @@ class Recorder:
         self.calls.append((dotted_path, params))
         return {"name": "cmt-1", "content": params["content"] if params else None}
 
-    def list(self, doctype: str, **kwargs: Any) -> Any:
+    def iter_all(self, doctype: str, **kwargs: Any) -> Any:
         self.listed.append((doctype, kwargs))
-        return [{"name": "cmt-1", "content": "hello"}]
+        yield from ({"name": f"cmt-{i}", "content": "hello"} for i in range(1, 151))
 
 
 def test_add_comment_goes_through_add_comment_not_a_raw_insert() -> None:
@@ -34,9 +34,12 @@ def test_add_comment_goes_through_add_comment_not_a_raw_insert() -> None:
     }
 
 
-def test_list_comments_filters_to_the_document() -> None:
+def test_list_comments_filters_to_the_document_and_reads_every_page() -> None:
+    """A truncated history is what makes an already-posted comment look absent."""
     site = Recorder()
-    assert list_comments(site, "Purchase Order", "PUR-ORD-1") == [{"name": "cmt-1", "content": "hello"}]
+    out = list_comments(site, "Purchase Order", "PUR-ORD-1")
+    assert len(out) == 150
+    assert out[0] == {"name": "cmt-1", "content": "hello"}
     doctype, kwargs = site.listed[0]
     assert doctype == "Comment"
     assert kwargs["filters"] == {
@@ -44,3 +47,4 @@ def test_list_comments_filters_to_the_document() -> None:
         "reference_name": "PUR-ORD-1",
         "comment_type": "Comment",
     }
+    assert "limit" not in kwargs
