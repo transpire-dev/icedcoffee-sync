@@ -41,13 +41,14 @@ def test_the_secret_never_appears_in_the_repr() -> None:
     assert SECRET not in repr(hook)
 
 
-def test_ensure_creates_only_the_missing_ones() -> None:
+def test_ensure_creates_the_missing_ones_and_reasserts_the_rest() -> None:
     from stolon.frappe.errors import DoesNotExistError
 
     class Site:
         def __init__(self) -> None:
             self.have = {"transpire-site-1-purchase-order-on_submit"}
             self.inserted: list[str] = []
+            self.updated: list[tuple[str, dict]] = []
 
         def get(self, doctype: str, name: str) -> dict:
             if name in self.have:
@@ -59,11 +60,25 @@ def test_ensure_creates_only_the_missing_ones() -> None:
             self.have.add(doc["name"])
             return doc
 
+        def update(self, doctype: str, name: str, doc: dict) -> dict:
+            self.updated.append((name, doc))
+            return {"name": name, **doc}
+
     site = Site()
     hooks = w.purchase_order_webhooks(site_id="site-1", request_url="https://gw.example/frappe", secret=SECRET)
-    created = w.ensure_webhooks(site, hooks)
-    assert created == [
+    first = w.ensure_webhooks(site, hooks)
+    assert first.created == [
         "transpire-site-1-purchase-order-on_update_after_submit",
         "transpire-site-1-purchase-order-on_cancel",
     ]
-    assert w.ensure_webhooks(site, hooks) == []
+    assert first.updated == ["transpire-site-1-purchase-order-on_submit"]
+    # The existing one was brought back to the desired document, secret included,
+    # and its name was not sent as a field to change.
+    _name, doc = site.updated[0]
+    assert doc["request_url"] == "https://gw.example/frappe" and doc["webhook_secret"] == SECRET
+    assert "name" not in doc
+
+    rotated = w.purchase_order_webhooks(site_id="site-1", request_url="https://gw2.example/frappe", secret="y" * 64)
+    second = w.ensure_webhooks(site, rotated)
+    assert second.created == [] and len(second.updated) == 3
+    assert all(doc["request_url"] == "https://gw2.example/frappe" for _, doc in site.updated[1:])

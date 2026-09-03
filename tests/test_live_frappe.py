@@ -239,9 +239,10 @@ def test_a_webhook_provisions_idempotently_and_is_deletable(client: Client) -> N
     site_id = f"live-{uuid.uuid4().hex[:8]}"
     hooks = w.purchase_order_webhooks(site_id=site_id, request_url="https://example.invalid/frappe", secret="x" * 64)
     try:
-        created = w.ensure_webhooks(client, hooks)
-        assert created == [h.name for h in hooks]
-        assert w.ensure_webhooks(client, hooks) == []
+        first = w.ensure_webhooks(client, hooks)
+        assert first.created == [h.name for h in hooks]
+        second = w.ensure_webhooks(client, hooks)
+        assert second.created == [] and second.updated == [h.name for h in hooks]
         got = client.get(w.DOCTYPE_WEBHOOK, hooks[0].name)
         assert got["webhook_docevent"] == "on_submit"
         assert {h["key"] for h in got["webhook_headers"]} == {"Content-Type", w.SITE_HEADER}

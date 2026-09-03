@@ -33,6 +33,7 @@ DOORBELL_TEMPLATE = '{"doctype": "{{ doc.doctype }}", "name": "{{ doc.name }}"}'
 class _Writer(Protocol):
     def get(self, doctype: str, name: str) -> Any: ...
     def insert(self, doctype: str, doc: dict[str, Any]) -> Any: ...
+    def update(self, doctype: str, name: str, doc: dict[str, Any]) -> Any: ...
 
 
 def webhook_name(site_id: str, doctype: str, event: str) -> str:
@@ -87,10 +88,33 @@ def purchase_order_webhooks(*, site_id: str, request_url: str, secret: str) -> t
     )
 
 
-def ensure_webhooks(client: _Writer, webhooks: Iterable[DesiredWebhook]) -> list[str]:
-    """Create every Webhook the site lacks; leave the rest alone.
+@dataclasses.dataclass(frozen=True)
+class WebhookReport:
+    """What `ensure_webhooks` did: the names it created and the names it re-asserted."""
+
+    created: list[str]
+    updated: list[str]
+
+
+def ensure_webhooks(client: _Writer, webhooks: Iterable[DesiredWebhook]) -> WebhookReport:
+    """Create every Webhook the site lacks; re-assert the machine-owned fields on the rest.
+
+    A Transpire Webhook is ours by name, so an existing one is brought back to
+    the desired document -- URL, headers, template, secret, enabled, timeout --
+    rather than left alone. That is what lets a re-run apply a changed gateway
+    URL or a re-derived secret after the master secret rotates; the secret is
+    a Password field Frappe never reads back, so it is always written.
 
     Returns:
-        The names created, in order.
+        The names created and the names updated, each in input order.
     """
-    return [hook.name for hook in webhooks if ensure_by_name(client, DOCTYPE_WEBHOOK, hook.name, hook.as_document())]
+    created: list[str] = []
+    updated: list[str] = []
+    for hook in webhooks:
+        document = hook.as_document()
+        if ensure_by_name(client, DOCTYPE_WEBHOOK, hook.name, document):
+            created.append(hook.name)
+            continue
+        client.update(DOCTYPE_WEBHOOK, hook.name, {k: v for k, v in document.items() if k != "name"})
+        updated.append(hook.name)
+    return WebhookReport(created=created, updated=updated)
