@@ -47,3 +47,22 @@ def test_any_https_host_passes_with_no_refused_hosts() -> None:
 
 def test_hostname_lowercases_and_strips_the_trailing_dot() -> None:
     assert site.hostname("https://Shop.Example.COM./api") == "shop.example.com"
+
+
+@pytest.mark.parametrize("url", ["https:///path", "https://", "https://:443"])
+def test_a_url_with_no_hostname_is_refused(url: str) -> None:
+    with pytest.raises(site.SiteUrlRefusedError, match="no hostname"):
+        site.require_safe_site_url(url)
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["https://shop.example.com/api/v2", "https://shop.example.com/?x=1", "https://shop.example.com/#frag"],
+)
+def test_anything_past_the_site_root_is_refused(url: str) -> None:
+    with pytest.raises(site.SiteUrlRefusedError, match="root"):
+        site.require_safe_site_url(url)
+
+
+def test_a_trailing_slash_is_still_the_root() -> None:
+    site.require_safe_site_url("https://shop.example.com/")

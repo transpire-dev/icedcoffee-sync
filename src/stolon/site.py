@@ -2,8 +2,9 @@
 
 No allowlist lives here. A connector that only reaches allowlisted hosts
 connects to nobody; a demo-data tool that reaches any host is a hazard. So
-this module refuses what is always wrong -- a credential in the URL, plain
-HTTP, a port that is not 443, and any host the caller names as refused -- and
+this module refuses what is always wrong -- a credential in the URL, no
+hostname, plain HTTP, a port that is not 443, anything past the site's root,
+and any host the caller names as refused -- and
 leaves "which hosts may I write to" to the caller.
 
 Refusal order is deliberate: userinfo first, because every later message
@@ -49,6 +50,8 @@ def require_safe_site_url(url: str, *, refused_hosts: frozenset[str] = frozenset
     if parts.username is not None or parts.password is not None:
         raise SiteUrlRefusedError("refusing a site URL carrying a credential; pass the key and secret separately")
     host = hostname(url)
+    if not host:
+        raise SiteUrlRefusedError(f"refusing {url!r}: no hostname")
     if host in refused_hosts:
         label = "the books site" if host == BOOKS_SITE_HOST else "a refused host"
         raise SiteUrlRefusedError(f"refusing {label} {host!r}")
@@ -60,3 +63,5 @@ def require_safe_site_url(url: str, *, refused_hosts: frozenset[str] = frozenset
         raise SiteUrlRefusedError(f"refusing {url!r}: unreadable port") from None
     if port not in (None, HTTPS_PORT):
         raise SiteUrlRefusedError(f"refusing {url!r}: port {port} is not {HTTPS_PORT}")
+    if parts.path not in ("", "/") or parts.query or parts.fragment:
+        raise SiteUrlRefusedError(f"refusing {url!r}: a site URL is the site's root, with no path, query, or fragment")
