@@ -249,3 +249,13 @@ def test_a_webhook_provisions_idempotently_and_is_deletable(client: Client) -> N
         for hook in hooks:
             with contextlib.suppress(DoesNotExistError):
                 client.delete(w.DOCTYPE_WEBHOOK, hook.name)
+
+
+def test_submitted_purchase_orders_list_and_read(client: Client) -> None:
+    from stolon.erpnext import purchase as p
+
+    rows = list(p.list_submitted_purchase_orders(client, modified_after=None, page_size=5))
+    if not rows:
+        pytest.skip("test site holds no submitted Purchase Orders")
+    po = p.read_purchase_order(client, rows[0]["name"])
+    assert po.is_submitted and po.items
