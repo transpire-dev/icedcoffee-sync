@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Iterator
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 DOCTYPE_PURCHASE_ORDER = "Purchase Order"
 DOCTYPE_PURCHASE_RECEIPT = "Purchase Receipt"
@@ -22,7 +22,7 @@ class _Getter(Protocol):
 
 
 class _Lister(Protocol):
-    def iter_all(self, doctype: str, **kwargs: Any) -> Iterator[dict[str, Any]]: ...
+    def list(self, doctype: str, **kwargs: Any) -> Any: ...
 
 
 class _Updater(Protocol):
@@ -138,27 +138,64 @@ def list_submitted_purchase_orders(
     compared server-side, so the cursor a caller stores is exactly what the
     site last returned. The document at the cursor itself is listed again;
     see the comment on the filter.
+
+    Pages by cursor rather than offset. `modified` is what the listing is
+    ordered by, and it moves: a document edited between two pages sorts later
+    than it did, and with offsets the unread document that slid into its old
+    slot would be skipped, permanently, once the caller stored the cursor.
+    Each page instead re-filters from the last `modified` it saw, so an
+    unread document can only ever be listed later, never lost. A document
+    can be listed twice (edited mid-poll, or tied at the cursor), which every
+    caller tolerates: its source id is keyed on `modified`.
     """
+    cursor = modified_after
+    # Names already yielded at exactly `cursor`, so a re-filtered page that
+    # starts with the same tie does not yield them again.
+    seen_at_cursor: set[str] = set()
+    # Offset within one `modified` value only: when a whole page ties at the
+    # cursor, re-filtering would return that same page forever. The offset is
+    # reset the moment the cursor moves, so it never spans a change of order.
+    start = 0
+    while True:
+        rows = _page(client, cursor=cursor, page_size=page_size, start=start)
+        if not rows:
+            return
+        for row in rows:
+            if row["modified"] == cursor and row["name"] in seen_at_cursor:
+                continue
+            yield row
+        last = rows[-1]["modified"]
+        if last == cursor:
+            seen_at_cursor.update(row["name"] for row in rows)
+            start += len(rows)
+        else:
+            cursor = last
+            seen_at_cursor = {row["name"] for row in rows if row["modified"] == last}
+            start = 0
+
+
+def _page(client: _Lister, *, cursor: str | None, page_size: int, start: int) -> list[dict[str, Any]]:
     # Submitted and cancelled, never drafts: a cancellation whose Webhook was
     # lost is exactly what the reconcile poll exists to recover.
     filters: list[list[Any]] = [["docstatus", "in", [1, 2]]]
-    if modified_after is not None:
+    if cursor is not None:
         # Inclusive on purpose: several documents can share one `modified`, and
         # a run that stopped between two of them would otherwise never see the
         # rest. Re-reading the document at the cursor is idempotent for every
-        # caller (its source id is keyed on `modified`, so nothing is written
-        # twice), which is cheaper than a composite cursor the caller cannot
+        # caller, which is cheaper than a composite cursor the caller cannot
         # express to Frappe.
-        filters.append(["modified", ">=", modified_after])
-    yield from client.iter_all(
+        filters.append(["modified", ">=", cursor])
+    rows = client.list(
         DOCTYPE_PURCHASE_ORDER,
         fields=["name", "modified"],
         filters=filters,
-        # `name` breaks ties: several documents can share a `modified`, and
-        # offset paging over an unstable order would skip or repeat one.
+        # `name` breaks ties within one `modified`, so the in-timestamp
+        # offset above walks a stable order.
         order_by="modified asc, name asc",
-        page_size=page_size,
+        limit=page_size,
+        start=start,
     )
+    return cast("list[dict[str, Any]]", rows) if isinstance(rows, list) else []
 
 
 def set_order_confirmation(client: _Updater, name: str, *, number: str, date: str) -> dict[str, Any]:

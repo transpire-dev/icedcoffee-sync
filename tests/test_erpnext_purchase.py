@@ -2,6 +2,7 @@
 
 import json
 import pathlib
+from collections.abc import Sequence
 from typing import Any
 
 from stolon.erpnext import purchase as p
@@ -47,41 +48,81 @@ def test_set_order_confirmation_updates_exactly_two_fields() -> None:
     ]
 
 
+class _PagedSite:
+    """A site whose listing answers each request from a scripted store, in `modified, name` order.
+
+    `edit` between pages moves a document's `modified`, which is the hazard
+    the pager exists to survive.
+    """
+
+    def __init__(self, docs: Sequence[tuple[str, str]]) -> None:
+        self.docs = dict(docs)  # name -> modified
+        self.kwargs: list[dict[str, Any]] = []
+
+    def edit(self, name: str, modified: str) -> None:
+        self.docs[name] = modified
+
+    def list(self, doctype: str, **kwargs: Any) -> Any:
+        self.kwargs.append(kwargs)
+        cursor = next((f[2] for f in kwargs["filters"] if f[0] == "modified"), None)
+        rows = sorted(((m, n) for n, m in self.docs.items() if cursor is None or m >= cursor))
+        page = rows[kwargs["start"] : kwargs["start"] + kwargs["limit"]]
+        return [{"name": n, "modified": m} for m, n in page]
+
+
 def test_listing_submitted_orders_pages_oldest_first_from_a_cursor() -> None:
-    class Site:
-        def __init__(self) -> None:
-            self.kwargs: list[dict[str, Any]] = []
-
-        def iter_all(self, doctype: str, **kwargs: Any):
-            self.kwargs.append(kwargs)
-            yield {"name": "PUR-ORD-1", "modified": "2026-08-01 10:00:00.000000"}
-
-    site = Site()
+    site = _PagedSite([("PUR-ORD-0", "2026-06-01 09:00:00.000000"), ("PUR-ORD-1", "2026-08-01 10:00:00.000000")])
     rows = list(p.list_submitted_purchase_orders(site, modified_after="2026-07-01 00:00:00"))
     assert rows == [{"name": "PUR-ORD-1", "modified": "2026-08-01 10:00:00.000000"}]
     kw = site.kwargs[0]
     # Inclusive: documents tied at the cursor timestamp are listed again rather
     # than lost to a run that stopped between them.
     assert kw["filters"] == [["docstatus", "in", [1, 2]], ["modified", ">=", "2026-07-01 00:00:00"]]
-    # A secondary key keeps offset paging stable when several documents share a `modified`.
     assert kw["order_by"] == "modified asc, name asc"
     assert kw["fields"] == ["name", "modified"]
+    assert (kw["limit"], kw["start"]) == (100, 0)
 
 
 def test_a_first_run_with_no_cursor_filters_on_submitted_only() -> None:
     """Without a cursor the whole site is in scope, but drafts still are not."""
-
-    class Site:
-        def __init__(self) -> None:
-            self.kwargs: list[dict[str, Any]] = []
-
-        def iter_all(self, doctype: str, **kwargs: Any):
-            self.kwargs.append(kwargs)
-            return iter(())
-
-    site = Site()
+    site = _PagedSite([])
     assert list(p.list_submitted_purchase_orders(site, modified_after=None)) == []
     assert site.kwargs[0]["filters"] == [["docstatus", "in", [1, 2]]]
+
+
+def test_a_document_edited_between_pages_cannot_hide_an_unread_one() -> None:
+    """Offset paging would skip PUR-ORD-3 here; cursor paging lists it."""
+    site = _PagedSite([
+        ("PUR-ORD-1", "2026-08-01 10:00:00.000000"),
+        ("PUR-ORD-2", "2026-08-01 10:00:01.000000"),
+        ("PUR-ORD-3", "2026-08-01 10:00:02.000000"),
+        ("PUR-ORD-4", "2026-08-01 10:00:03.000000"),
+    ])
+    listing = p.list_submitted_purchase_orders(site, modified_after=None, page_size=2)
+    first = [next(listing), next(listing)]
+    assert [r["name"] for r in first] == ["PUR-ORD-1", "PUR-ORD-2"]
+    # PUR-ORD-1 is edited after page one was read: it now sorts last.
+    site.edit("PUR-ORD-1", "2026-08-01 10:00:09.000000")
+    rest = [r["name"] for r in listing]
+    assert "PUR-ORD-3" in rest and "PUR-ORD-4" in rest
+    # The edited document is listed again, later; a caller tolerates the repeat.
+    assert rest[-1] == "PUR-ORD-1"
+    # The second page re-filters from the last `modified` seen, at offset 0,
+    # rather than asking for offset 2 of an order that has since changed.
+    assert site.kwargs[1]["start"] == 0
+    assert site.kwargs[1]["filters"][-1] == ["modified", ">=", "2026-08-01 10:00:01.000000"]
+
+
+def test_a_page_full_of_ties_advances_by_offset_within_the_timestamp() -> None:
+    same = "2026-08-01 10:00:00.000000"
+    site = _PagedSite([(f"PUR-ORD-{i}", same) for i in range(5)] + [("PUR-ORD-9", "2026-08-01 10:00:05.000000")])
+    rows = [r["name"] for r in p.list_submitted_purchase_orders(site, modified_after=None, page_size=2)]
+    assert rows == [f"PUR-ORD-{i}" for i in range(5)] + ["PUR-ORD-9"]
+    # A cursor move re-reads the tie it ended on (offset 0, already-yielded
+    # names skipped); within a tie the offset walks forward; the next cursor
+    # move resets it.
+    pages = [(kw["start"], next((f[2] for f in kw["filters"] if f[0] == "modified"), None)) for kw in site.kwargs]
+    assert pages[:5] == [(0, None), (0, same), (2, same), (4, same), (0, "2026-08-01 10:00:05.000000")]
 
 
 def test_a_draft_purchase_receipt_names_its_source_and_carries_no_docstatus() -> None:
