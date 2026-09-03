@@ -65,6 +65,22 @@ def test_listing_submitted_orders_pages_oldest_first_from_a_cursor() -> None:
     assert kw["fields"] == ["name", "modified"]
 
 
+def test_a_first_run_with_no_cursor_filters_on_submitted_only() -> None:
+    """Without a cursor the whole site is in scope, but drafts still are not."""
+
+    class Site:
+        def __init__(self) -> None:
+            self.kwargs: list[dict[str, Any]] = []
+
+        def iter_all(self, doctype: str, **kwargs: Any):
+            self.kwargs.append(kwargs)
+            return iter(())
+
+    site = Site()
+    assert list(p.list_submitted_purchase_orders(site, modified_after=None)) == []
+    assert site.kwargs[0]["filters"] == [["docstatus", "=", 1]]
+
+
 def test_a_draft_purchase_receipt_names_its_source_and_carries_no_docstatus() -> None:
     receipt = p.DesiredPurchaseReceipt(
         purchase_order="PUR-ORD-1",
