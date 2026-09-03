@@ -132,14 +132,16 @@ def read_purchase_order(client: _Getter, name: str) -> PurchaseOrder:
 def list_submitted_purchase_orders(
     client: _Lister, *, modified_after: str | None, page_size: int = 100
 ) -> Iterator[dict[str, Any]]:
-    """`{"name", "modified"}` for every submitted PO past the cursor, oldest first.
+    """`{"name", "modified"}` for every submitted or cancelled PO past the cursor, oldest first.
 
     `modified_after` is Frappe's own timestamp text (`YYYY-MM-DD HH:MM:SS[.ffffff]`),
     compared server-side, so the cursor a caller stores is exactly what the
     site last returned. The document at the cursor itself is listed again;
     see the comment on the filter.
     """
-    filters: list[list[Any]] = [["docstatus", "=", 1]]
+    # Submitted and cancelled, never drafts: a cancellation whose Webhook was
+    # lost is exactly what the reconcile poll exists to recover.
+    filters: list[list[Any]] = [["docstatus", "in", [1, 2]]]
     if modified_after is not None:
         # Inclusive on purpose: several documents can share one `modified`, and
         # a run that stopped between two of them would otherwise never see the

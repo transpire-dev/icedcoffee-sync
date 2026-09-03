@@ -62,7 +62,7 @@ def test_listing_submitted_orders_pages_oldest_first_from_a_cursor() -> None:
     kw = site.kwargs[0]
     # Inclusive: documents tied at the cursor timestamp are listed again rather
     # than lost to a run that stopped between them.
-    assert kw["filters"] == [["docstatus", "=", 1], ["modified", ">=", "2026-07-01 00:00:00"]]
+    assert kw["filters"] == [["docstatus", "in", [1, 2]], ["modified", ">=", "2026-07-01 00:00:00"]]
     assert kw["order_by"] == "modified asc"
     assert kw["fields"] == ["name", "modified"]
 
@@ -80,7 +80,7 @@ def test_a_first_run_with_no_cursor_filters_on_submitted_only() -> None:
 
     site = Site()
     assert list(p.list_submitted_purchase_orders(site, modified_after=None)) == []
-    assert site.kwargs[0]["filters"] == [["docstatus", "=", 1]]
+    assert site.kwargs[0]["filters"] == [["docstatus", "in", [1, 2]]]
 
 
 def test_a_draft_purchase_receipt_names_its_source_and_carries_no_docstatus() -> None:
