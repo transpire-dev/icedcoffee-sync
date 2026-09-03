@@ -1,0 +1,49 @@
+"""The URL checks every ERPNext site URL passes, allowlist or not."""
+
+import pytest
+
+from stolon import site
+
+
+def test_userinfo_is_refused_before_anything_and_never_echoed() -> None:
+    with pytest.raises(site.SiteUrlRefusedError) as excinfo:
+        site.require_safe_site_url("https://alice:hunter2@shop.example.com")
+    assert "hunter2" not in str(excinfo.value)
+    assert "credential" in str(excinfo.value)
+
+
+def test_a_refused_host_is_refused_by_name() -> None:
+    with pytest.raises(site.SiteUrlRefusedError, match="books site"):
+        site.require_safe_site_url(f"https://{site.BOOKS_SITE_HOST}", refused_hosts=frozenset({site.BOOKS_SITE_HOST}))
+
+
+def test_a_fully_qualified_refused_host_is_still_refused() -> None:
+    with pytest.raises(site.SiteUrlRefusedError, match="books site"):
+        site.require_safe_site_url(
+            f"https://{site.BOOKS_SITE_HOST}./x", refused_hosts=frozenset({site.BOOKS_SITE_HOST})
+        )
+
+
+def test_plain_http_is_refused() -> None:
+    with pytest.raises(site.SiteUrlRefusedError, match="https"):
+        site.require_safe_site_url("http://shop.example.com")
+
+
+@pytest.mark.parametrize(
+    "url", ["https://shop.example.com:8443", "https://shop.example.com:not-a-port", "https://shop.example.com:65536"]
+)
+def test_a_port_other_than_443_is_refused(url: str) -> None:
+    with pytest.raises(site.SiteUrlRefusedError, match="port"):
+        site.require_safe_site_url(url)
+
+
+def test_an_explicit_443_passes() -> None:
+    site.require_safe_site_url("https://shop.example.com:443")
+
+
+def test_any_https_host_passes_with_no_refused_hosts() -> None:
+    site.require_safe_site_url("https://customer-erp.example.com")
+
+
+def test_hostname_lowercases_and_strips_the_trailing_dot() -> None:
+    assert site.hostname("https://Shop.Example.COM./api") == "shop.example.com"
