@@ -259,7 +259,9 @@ def test_submitted_purchase_orders_list_and_read(client: Client) -> None:
     if not rows:
         pytest.skip("test site holds no submitted Purchase Orders")
     po = p.read_purchase_order(client, rows[0]["name"])
-    assert po.is_submitted and po.items
+    # The listing deliberately includes cancelled documents, so the first row
+    # may be either; what matters is that a finalized document reads with lines.
+    assert (po.is_submitted or po.is_cancelled) and po.items
 
 
 def test_a_comment_lands_on_the_document_and_lists_back(note: tuple[Client, str, str]) -> None:
