@@ -136,11 +136,18 @@ def list_submitted_purchase_orders(
 
     `modified_after` is Frappe's own timestamp text (`YYYY-MM-DD HH:MM:SS[.ffffff]`),
     compared server-side, so the cursor a caller stores is exactly what the
-    site last returned.
+    site last returned. The document at the cursor itself is listed again;
+    see the comment on the filter.
     """
     filters: list[list[Any]] = [["docstatus", "=", 1]]
     if modified_after is not None:
-        filters.append(["modified", ">", modified_after])
+        # Inclusive on purpose: several documents can share one `modified`, and
+        # a run that stopped between two of them would otherwise never see the
+        # rest. Re-reading the document at the cursor is idempotent for every
+        # caller (its source id is keyed on `modified`, so nothing is written
+        # twice), which is cheaper than a composite cursor the caller cannot
+        # express to Frappe.
+        filters.append(["modified", ">=", modified_after])
     yield from client.iter_all(
         DOCTYPE_PURCHASE_ORDER,
         fields=["name", "modified"],

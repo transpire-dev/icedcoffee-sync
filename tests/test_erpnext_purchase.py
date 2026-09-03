@@ -60,7 +60,9 @@ def test_listing_submitted_orders_pages_oldest_first_from_a_cursor() -> None:
     rows = list(p.list_submitted_purchase_orders(site, modified_after="2026-07-01 00:00:00"))
     assert rows == [{"name": "PUR-ORD-1", "modified": "2026-08-01 10:00:00.000000"}]
     kw = site.kwargs[0]
-    assert kw["filters"] == [["docstatus", "=", 1], ["modified", ">", "2026-07-01 00:00:00"]]
+    # Inclusive: documents tied at the cursor timestamp are listed again rather
+    # than lost to a run that stopped between them.
+    assert kw["filters"] == [["docstatus", "=", 1], ["modified", ">=", "2026-07-01 00:00:00"]]
     assert kw["order_by"] == "modified asc"
     assert kw["fields"] == ["name", "modified"]
 
