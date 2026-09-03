@@ -18,7 +18,7 @@ from stolon.frappe.lifecycle import DocStatus, SubmitNotPermittedError
 pytestmark = pytest.mark.live_frappe
 
 # Every host these tests may run against -- an ALLOWLIST, not a denylist:
-_TEST_SITE_HOSTS = frozenset({"transpire-test.frappe.cloud"})
+_TEST_SITE_HOSTS = frozenset({"transpire-test.frappe.cloud", "example-demo-sites.invalid"})
 
 
 def _is_test_site(url: str) -> bool:
@@ -231,3 +231,21 @@ def test_upload_file_attaches_a_private_file_to_a_document(client: Client) -> No
                 client.delete("File", file_name)
         with contextlib.suppress(DoesNotExistError):
             client.delete("Note", note_name)
+
+
+def test_a_webhook_provisions_idempotently_and_is_deletable(client: Client) -> None:
+    from stolon.erpnext import webhook as w
+
+    site_id = f"live-{uuid.uuid4().hex[:8]}"
+    hooks = w.purchase_order_webhooks(site_id=site_id, request_url="https://example.invalid/frappe", secret="x" * 64)
+    try:
+        created = w.ensure_webhooks(client, hooks)
+        assert created == [h.name for h in hooks]
+        assert w.ensure_webhooks(client, hooks) == []
+        got = client.get(w.DOCTYPE_WEBHOOK, hooks[0].name)
+        assert got["webhook_docevent"] == "on_submit"
+        assert {h["key"] for h in got["webhook_headers"]} == {"Content-Type", w.SITE_HEADER}
+    finally:
+        for hook in hooks:
+            with contextlib.suppress(DoesNotExistError):
+                client.delete(w.DOCTYPE_WEBHOOK, hook.name)
