@@ -63,7 +63,8 @@ def test_listing_submitted_orders_pages_oldest_first_from_a_cursor() -> None:
     # Inclusive: documents tied at the cursor timestamp are listed again rather
     # than lost to a run that stopped between them.
     assert kw["filters"] == [["docstatus", "in", [1, 2]], ["modified", ">=", "2026-07-01 00:00:00"]]
-    assert kw["order_by"] == "modified asc"
+    # A secondary key keeps offset paging stable when several documents share a `modified`.
+    assert kw["order_by"] == "modified asc, name asc"
     assert kw["fields"] == ["name", "modified"]
 
 

@@ -154,7 +154,9 @@ def list_submitted_purchase_orders(
         DOCTYPE_PURCHASE_ORDER,
         fields=["name", "modified"],
         filters=filters,
-        order_by="modified asc",
+        # `name` breaks ties: several documents can share a `modified`, and
+        # offset paging over an unstable order would skip or repeat one.
+        order_by="modified asc, name asc",
         page_size=page_size,
     )
 
