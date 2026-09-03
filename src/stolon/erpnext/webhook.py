@@ -52,6 +52,9 @@ class DesiredWebhook:
     request_url: str
     site_id: str
     secret: str = dataclasses.field(repr=False)
+    # Off until the gateway topic and phloem's route exist: an enabled Webhook
+    # pointed at a route that 404s burns Frappe's three attempts for nothing.
+    enabled: bool = False
 
     def as_document(self) -> dict[str, Any]:
         return {
@@ -68,13 +71,19 @@ class DesiredWebhook:
             ],
             "enable_security": 1,
             "webhook_secret": self.secret,
-            "enabled": 1,
+            "enabled": 1 if self.enabled else 0,
             "timeout": TIMEOUT_SECONDS,
         }
 
 
-def purchase_order_webhooks(*, site_id: str, request_url: str, secret: str) -> tuple[DesiredWebhook, ...]:
-    """The three Purchase Order Webhooks the connector listens to."""
+def purchase_order_webhooks(
+    *, site_id: str, request_url: str, secret: str, enabled: bool = False
+) -> tuple[DesiredWebhook, ...]:
+    """The three Purchase Order Webhooks the connector listens to.
+
+    `enabled` stays False until the inbound route and its topic are deployed;
+    re-running provisioning with it True is what switches deliveries on.
+    """
     return tuple(
         DesiredWebhook(
             name=webhook_name(site_id, PURCHASE_ORDER, event),
@@ -83,6 +92,7 @@ def purchase_order_webhooks(*, site_id: str, request_url: str, secret: str) -> t
             request_url=request_url,
             site_id=site_id,
             secret=secret,
+            enabled=enabled,
         )
         for event in PURCHASE_ORDER_EVENTS
     )

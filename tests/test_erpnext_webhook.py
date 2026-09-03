@@ -26,7 +26,12 @@ def test_the_document_uses_the_v16_field_names_and_a_two_field_json_template() -
     assert doc["request_method"] == "POST"
     assert doc["request_structure"] == "JSON"
     assert doc["enable_security"] == 1 and doc["webhook_secret"] == SECRET
-    assert doc["enabled"] == 1 and doc["timeout"] == 10
+    # Disabled by default: deliveries start only once the inbound route exists.
+    assert doc["enabled"] == 0 and doc["timeout"] == 10
+    live = w.purchase_order_webhooks(
+        site_id="site-1", request_url="https://gw.example/frappe", secret=SECRET, enabled=True
+    )
+    assert live[0].as_document()["enabled"] == 1
     assert {h["key"]: h["value"] for h in doc["webhook_headers"]} == {
         "Content-Type": "application/json",
         "X-Transpire-Site": "site-1",
