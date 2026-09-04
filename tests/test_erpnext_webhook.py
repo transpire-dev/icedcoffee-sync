@@ -82,8 +82,21 @@ def test_ensure_creates_the_missing_ones_and_reasserts_the_rest() -> None:
     _name, doc = site.updated[0]
     assert doc["request_url"] == "https://gw.example/frappe" and doc["webhook_secret"] == SECRET
     assert "name" not in doc
+    # Nothing said which way the switch should go, so the existing Webhook keeps its own.
+    assert "enabled" not in doc
 
     rotated = w.purchase_order_webhooks(site_id="site-1", request_url="https://gw2.example/frappe", secret="y" * 64)
     second = w.ensure_webhooks(site, rotated)
     assert second.created == [] and len(second.updated) == 3
     assert all(doc["request_url"] == "https://gw2.example/frappe" for _, doc in site.updated[1:])
+
+    # Said explicitly, the switch is written either way.
+    for enabled, expected in ((True, 1), (False, 0)):
+        site.updated.clear()
+        w.ensure_webhooks(
+            site,
+            w.purchase_order_webhooks(
+                site_id="site-1", request_url="https://gw2.example/frappe", secret=SECRET, enabled=enabled
+            ),
+        )
+        assert {doc["enabled"] for _, doc in site.updated} == {expected}

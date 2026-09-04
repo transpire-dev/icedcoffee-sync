@@ -52,9 +52,12 @@ class DesiredWebhook:
     request_url: str
     site_id: str
     secret: str = dataclasses.field(repr=False)
-    # Off until the gateway topic and phloem's route exist: an enabled Webhook
-    # pointed at a route that 404s burns Frappe's three attempts for nothing.
-    enabled: bool = False
+    # None means "do not touch the switch": a Webhook this creates starts off
+    # (an enabled Webhook pointed at a route that 404s burns Frappe's three
+    # attempts for nothing), and one that already exists keeps whatever it
+    # was, so a re-run for a key rotation cannot silently stop deliveries.
+    # True and False set it either way.
+    enabled: bool | None = None
 
     def as_document(self) -> dict[str, Any]:
         return {
@@ -77,12 +80,13 @@ class DesiredWebhook:
 
 
 def purchase_order_webhooks(
-    *, site_id: str, request_url: str, secret: str, enabled: bool = False
+    *, site_id: str, request_url: str, secret: str, enabled: bool | None = None
 ) -> tuple[DesiredWebhook, ...]:
     """The three Purchase Order Webhooks the connector listens to.
 
-    `enabled` stays False until the inbound route and its topic are deployed;
-    re-running provisioning with it True is what switches deliveries on.
+    `enabled` left None creates them off and leaves existing ones as they are;
+    re-running provisioning with it True, once the inbound route and its topic
+    are deployed, is what switches deliveries on. False switches them off.
     """
     return tuple(
         DesiredWebhook(
@@ -110,10 +114,12 @@ def ensure_webhooks(client: _Writer, webhooks: Iterable[DesiredWebhook]) -> Webh
     """Create every Webhook the site lacks; re-assert the machine-owned fields on the rest.
 
     A Transpire Webhook is ours by name, so an existing one is brought back to
-    the desired document -- URL, headers, template, secret, enabled, timeout --
-    rather than left alone. That is what lets a re-run apply a changed gateway
-    URL or a re-derived secret after the master secret rotates; the secret is
-    a Password field Frappe never reads back, so it is always written.
+    the desired document -- URL, headers, template, secret, timeout -- rather
+    than left alone. That is what lets a re-run apply a changed gateway URL or
+    a re-derived secret after the master secret rotates; the secret is a
+    Password field Frappe never reads back, so it is always written. The
+    `enabled` switch is re-asserted only when the desired document says which
+    way (see `DesiredWebhook.enabled`).
 
     Returns:
         The names created and the names updated, each in input order.
@@ -125,6 +131,7 @@ def ensure_webhooks(client: _Writer, webhooks: Iterable[DesiredWebhook]) -> Webh
         if ensure_by_name(client, DOCTYPE_WEBHOOK, hook.name, document):
             created.append(hook.name)
             continue
-        client.update(DOCTYPE_WEBHOOK, hook.name, {k: v for k, v in document.items() if k != "name"})
+        untouched = {"name"} | ({"enabled"} if hook.enabled is None else set())
+        client.update(DOCTYPE_WEBHOOK, hook.name, {k: v for k, v in document.items() if k not in untouched})
         updated.append(hook.name)
     return WebhookReport(created=created, updated=updated)
