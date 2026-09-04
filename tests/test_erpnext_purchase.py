@@ -49,7 +49,7 @@ def test_set_order_confirmation_updates_exactly_two_fields() -> None:
 
 
 class _PagedSite:
-    """A site whose listing answers each request from a scripted store, in `modified, name` order.
+    """A site whose `list_page` answers from a scripted store the way Frappe v2 does.
 
     `edit` between pages moves a document's `modified`, which is the hazard
     the pager exists to survive.
@@ -62,12 +62,32 @@ class _PagedSite:
     def edit(self, name: str, modified: str) -> None:
         self.docs[name] = modified
 
-    def list(self, doctype: str, **kwargs: Any) -> Any:
-        self.kwargs.append(kwargs)
-        cursor = next((f[2] for f in kwargs["filters"] if f[0] == "modified"), None)
-        rows = sorted(((m, n) for n, m in self.docs.items() if cursor is None or m >= cursor))
-        page = rows[kwargs["start"] : kwargs["start"] + kwargs["limit"]]
-        return [{"name": n, "modified": m} for m, n in page]
+    def list_page(
+        self, doctype: str, limit: int, start: int, **kwargs: Any
+    ) -> tuple[list[dict[str, Any]], bool | None]:
+        self.kwargs.append({"limit": limit, "start": start, **kwargs})
+        rows = [{"name": n, "modified": m} for n, m in self.docs.items()]
+        for field, op, value in kwargs["filters"]:
+            if field == "docstatus":
+                continue
+            ops = {">=": lambda a, b: a >= b, ">": lambda a, b: a > b, "=": lambda a, b: a == b}
+            rows = [r for r in rows if ops[op](r[field], value)]
+        key = (
+            (lambda r: (r["modified"], r["name"]))
+            if kwargs["order_by"].startswith("modified")
+            else (lambda r: r["name"])
+        )
+        rows.sort(key=key)
+        page = rows[start : start + limit]
+        return page, len(rows) > start + limit
+
+
+def _cursor_of(kw: dict[str, Any]) -> tuple[str, str | None] | None:
+    """(`modified` op, value) of a request, for asserting how the pager moved."""
+    for field, op, value in kw["filters"]:
+        if field == "modified":
+            return op, value
+    return None
 
 
 def test_listing_submitted_orders_pages_oldest_first_from_a_cursor() -> None:
@@ -81,6 +101,8 @@ def test_listing_submitted_orders_pages_oldest_first_from_a_cursor() -> None:
     assert kw["order_by"] == "modified asc, name asc"
     assert kw["fields"] == ["name", "modified"]
     assert (kw["limit"], kw["start"]) == (100, 0)
+    # One short page: nothing more was asked for.
+    assert len(site.kwargs) == 1
 
 
 def test_a_first_run_with_no_cursor_filters_on_submitted_only() -> None:
@@ -91,7 +113,7 @@ def test_a_first_run_with_no_cursor_filters_on_submitted_only() -> None:
 
 
 def test_a_document_edited_between_pages_cannot_hide_an_unread_one() -> None:
-    """Offset paging would skip PUR-ORD-3 here; cursor paging lists it."""
+    """Offset paging would skip PUR-ORD-3 here; key paging lists it."""
     site = _PagedSite([
         ("PUR-ORD-1", "2026-08-01 10:00:00.000000"),
         ("PUR-ORD-2", "2026-08-01 10:00:01.000000"),
@@ -104,25 +126,40 @@ def test_a_document_edited_between_pages_cannot_hide_an_unread_one() -> None:
     # PUR-ORD-1 is edited after page one was read: it now sorts last.
     site.edit("PUR-ORD-1", "2026-08-01 10:00:09.000000")
     rest = [r["name"] for r in listing]
-    assert "PUR-ORD-3" in rest and "PUR-ORD-4" in rest
-    # The edited document is listed again, later; a caller tolerates the repeat.
-    assert rest[-1] == "PUR-ORD-1"
-    # The second page re-filters from the last `modified` seen, at offset 0,
-    # rather than asking for offset 2 of an order that has since changed.
-    assert site.kwargs[1]["start"] == 0
-    assert site.kwargs[1]["filters"][-1] == ["modified", ">=", "2026-08-01 10:00:01.000000"]
+    assert rest == ["PUR-ORD-3", "PUR-ORD-4", "PUR-ORD-1"]
+    # After the first page: the rest of the tie at its last `modified` (none),
+    # then strictly after it; never an offset into a changed order.
+    assert [_cursor_of(kw) for kw in site.kwargs[1:3]] == [
+        ("=", "2026-08-01 10:00:01.000000"),
+        (">", "2026-08-01 10:00:01.000000"),
+    ]
+    assert site.kwargs[1]["filters"][-1] == ["name", ">", "PUR-ORD-2"]
+    assert all(kw["start"] == 0 for kw in site.kwargs)
 
 
-def test_a_page_full_of_ties_advances_by_offset_within_the_timestamp() -> None:
+def test_a_tie_wider_than_a_page_is_walked_by_name() -> None:
     same = "2026-08-01 10:00:00.000000"
     site = _PagedSite([(f"PUR-ORD-{i}", same) for i in range(5)] + [("PUR-ORD-9", "2026-08-01 10:00:05.000000")])
     rows = [r["name"] for r in p.list_submitted_purchase_orders(site, modified_after=None, page_size=2)]
     assert rows == [f"PUR-ORD-{i}" for i in range(5)] + ["PUR-ORD-9"]
-    # A cursor move re-reads the tie it ended on (offset 0, already-yielded
-    # names skipped); within a tie the offset walks forward; the next cursor
-    # move resets it.
-    pages = [(kw["start"], next((f[2] for f in kw["filters"] if f[0] == "modified"), None)) for kw in site.kwargs]
-    assert pages[:5] == [(0, None), (0, same), (2, same), (4, same), (0, "2026-08-01 10:00:05.000000")]
+    assert [_cursor_of(kw) for kw in site.kwargs] == [None, ("=", same), ("=", same), (">", same)]
+    assert [kw["filters"][-1] for kw in site.kwargs[1:3]] == [["name", ">", "PUR-ORD-1"], ["name", ">", "PUR-ORD-3"]]
+
+
+def test_a_server_that_caps_the_page_is_paged_by_its_flag_not_the_count() -> None:
+    """A short page with `has_next_page: true` (a cap) keeps going; only the flag ends it."""
+
+    class Capped(_PagedSite):
+        def list_page(
+            self, doctype: str, limit: int, start: int, **kwargs: Any
+        ) -> tuple[list[dict[str, Any]], bool | None]:
+            page, more = super().list_page(doctype, min(limit, 1), start, **kwargs)
+            self.kwargs[-1]["limit"] = limit
+            return page, more
+
+    site = Capped([(f"PUR-ORD-{i}", f"2026-08-01 10:00:0{i}.000000") for i in range(3)])
+    rows = [r["name"] for r in p.list_submitted_purchase_orders(site, modified_after=None, page_size=100)]
+    assert rows == ["PUR-ORD-0", "PUR-ORD-1", "PUR-ORD-2"]
 
 
 def test_a_draft_purchase_receipt_names_its_source_and_carries_no_docstatus() -> None:

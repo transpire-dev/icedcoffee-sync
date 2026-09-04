@@ -74,7 +74,7 @@ def test_iter_all_returns_at_least_a_full_page(client: Client) -> None:
 
     # Establish the true count independently first. Deciding whether to skip
     reference_limit = 1000
-    everything, reference_truncated = client._list_page("Account", reference_limit, 0, fields=["name"])
+    everything, reference_truncated = client.list_page("Account", reference_limit, 0, fields=["name"])
     if reference_truncated:
         # The reference is itself truncated, so it is not a total and cannot be
         pytest.skip(f"site has more than {reference_limit} accounts; reference list is truncated")
