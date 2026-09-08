@@ -132,7 +132,7 @@ def read_purchase_order(client: _Getter, name: str) -> PurchaseOrder:
 
 
 def list_submitted_purchase_orders(
-    client: _Lister, *, modified_after: str | None, page_size: int = 100
+    client: _Lister, *, modified_after: str | None, page_size: int = 100, company: str | None = None
 ) -> Iterator[dict[str, Any]]:
     """`{"name", "modified"}` for every submitted or cancelled PO past the cursor, oldest first.
 
@@ -140,6 +140,9 @@ def list_submitted_purchase_orders(
     compared server-side, so the cursor a caller stores is exactly what the
     site last returned. The document at the cursor itself is listed again;
     see the comment on the filter.
+
+    `company` narrows to one Frappe Company (a tenant's site may run several);
+    omitted, every company on the site is in scope.
 
     Pages by key, never by offset. `modified` is what the listing is ordered
     by, and it moves: a document edited between two pages sorts later than it
@@ -160,7 +163,7 @@ def list_submitted_purchase_orders(
             # walk is stable however the documents are edited meanwhile.
             while True:
                 tie = [["modified", "=", cursor], ["name", ">", last_name]]
-                rows, more = _page(client, tie, order_by="name asc", page_size=page_size)
+                rows, more = _page(client, tie, order_by="name asc", page_size=page_size, company=company)
                 if not rows:
                     break
                 yield from rows
@@ -175,7 +178,7 @@ def list_submitted_purchase_orders(
             # Re-reading the document at the cursor is idempotent for every
             # caller. Strict once the tie has been walked above.
             after = [["modified", ">" if last_name is not None else ">=", cursor]]
-        rows, more = _page(client, after, order_by="modified asc, name asc", page_size=page_size)
+        rows, more = _page(client, after, order_by="modified asc, name asc", page_size=page_size, company=company)
         if not rows:
             return
         yield from rows
@@ -185,16 +188,19 @@ def list_submitted_purchase_orders(
 
 
 def _page(
-    client: _Lister, filters: list[list[Any]], *, order_by: str, page_size: int
+    client: _Lister, filters: list[list[Any]], *, order_by: str, page_size: int, company: str | None = None
 ) -> tuple[list[dict[str, Any]], bool | None]:
     # Submitted and cancelled, never drafts: a cancellation whose Webhook was
     # lost is exactly what the reconcile poll exists to recover.
+    base: list[list[Any]] = [["docstatus", "in", [1, 2]]]
+    if company:
+        base.append(["company", "=", company])
     return client.list_page(
         DOCTYPE_PURCHASE_ORDER,
         page_size,
         0,
         fields=["name", "modified"],
-        filters=[["docstatus", "in", [1, 2]], *filters],
+        filters=[*base, *filters],
         order_by=order_by,
     )
 

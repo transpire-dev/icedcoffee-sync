@@ -112,6 +112,12 @@ def test_a_first_run_with_no_cursor_filters_on_submitted_only() -> None:
     assert site.kwargs[0]["filters"] == [["docstatus", "in", [1, 2]]]
 
 
+def test_a_company_filter_narrows_the_listing() -> None:
+    site = _PagedSite([])
+    assert list(p.list_submitted_purchase_orders(site, modified_after=None, company="Acmebike Cycles")) == []
+    assert site.kwargs[0]["filters"] == [["docstatus", "in", [1, 2]], ["company", "=", "Acmebike Cycles"]]
+
+
 def test_a_document_edited_between_pages_cannot_hide_an_unread_one() -> None:
     """Offset paging would skip PUR-ORD-3 here; key paging lists it."""
     site = _PagedSite([
