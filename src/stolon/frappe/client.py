@@ -242,8 +242,13 @@ class Client:
         self._require_submit()
         return self.call("frappe.client.cancel", {"doctype": doctype, "name": name})
 
-    def _list_page(self, doctype: str, limit: int, start: int, **kwargs: Any) -> tuple[_Rows, bool | None]:
-        """One page of documents, plus whether the server says more remain."""
+    def list_page(self, doctype: str, limit: int, start: int, **kwargs: Any) -> tuple[_Rows, bool | None]:
+        """One page of documents, plus whether the server says more remain.
+
+        The primitive under `iter_all`, public for callers that page by cursor
+        rather than offset: the flag is how they tell a page cut short by a
+        server cap from the end of the result.
+        """
         request = req.list_documents(doctype, limit=limit, start=start, **kwargs)
         response = self._http.request(**_send_args(self._config, request))
         payload = envelope(response.status_code, response.text)
@@ -262,7 +267,7 @@ class Client:
         _reject_reserved_pagination_kwargs(kwargs)
         start = 0
         while True:
-            rows, more = self._list_page(doctype, page_size, start, **kwargs)
+            rows, more = self.list_page(doctype, page_size, start, **kwargs)
             if not rows:
                 return
             yield from rows
@@ -401,7 +406,7 @@ class AsyncClient:
         self._require_submit()
         return await self.call("frappe.client.cancel", {"doctype": doctype, "name": name})
 
-    async def _list_page(self, doctype: str, limit: int, start: int, **kwargs: Any) -> tuple[_Rows, bool | None]:
+    async def list_page(self, doctype: str, limit: int, start: int, **kwargs: Any) -> tuple[_Rows, bool | None]:
         """One page of documents, plus whether the server says more remain."""
         request = req.list_documents(doctype, limit=limit, start=start, **kwargs)
         response = await self._http.request(**_send_args(self._config, request))
@@ -419,7 +424,7 @@ class AsyncClient:
         _reject_reserved_pagination_kwargs(kwargs)
         start = 0
         while True:
-            rows, more = await self._list_page(doctype, page_size, start, **kwargs)
+            rows, more = await self.list_page(doctype, page_size, start, **kwargs)
             if not rows:
                 return
             for row in rows:

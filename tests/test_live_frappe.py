@@ -18,7 +18,7 @@ from stolon.frappe.lifecycle import DocStatus, SubmitNotPermittedError
 pytestmark = pytest.mark.live_frappe
 
 # Every host these tests may run against -- an ALLOWLIST, not a denylist:
-_TEST_SITE_HOSTS = frozenset({"transpire-test.frappe.cloud"})
+_TEST_SITE_HOSTS = frozenset({"transpire-test.frappe.cloud", "example-demo-sites.invalid"})
 
 
 def _is_test_site(url: str) -> bool:
@@ -74,7 +74,7 @@ def test_iter_all_returns_at_least_a_full_page(client: Client) -> None:
 
     # Establish the true count independently first. Deciding whether to skip
     reference_limit = 1000
-    everything, reference_truncated = client._list_page("Account", reference_limit, 0, fields=["name"])
+    everything, reference_truncated = client.list_page("Account", reference_limit, 0, fields=["name"])
     if reference_truncated:
         # The reference is itself truncated, so it is not a total and cannot be
         pytest.skip(f"site has more than {reference_limit} accounts; reference list is truncated")
@@ -231,3 +231,44 @@ def test_upload_file_attaches_a_private_file_to_a_document(client: Client) -> No
                 client.delete("File", file_name)
         with contextlib.suppress(DoesNotExistError):
             client.delete("Note", note_name)
+
+
+def test_a_webhook_provisions_idempotently_and_is_deletable(client: Client) -> None:
+    from stolon.erpnext import webhook as w
+
+    site_id = f"live-{uuid.uuid4().hex[:8]}"
+    hooks = w.purchase_order_webhooks(site_id=site_id, request_url="https://example.invalid/frappe", secret="x" * 64)
+    try:
+        first = w.ensure_webhooks(client, hooks)
+        assert first.created == [h.name for h in hooks]
+        second = w.ensure_webhooks(client, hooks)
+        assert second.created == [] and second.updated == [h.name for h in hooks]
+        got = client.get(w.DOCTYPE_WEBHOOK, hooks[0].name)
+        assert got["webhook_docevent"] == "on_submit"
+        assert {h["key"] for h in got["webhook_headers"]} == {"Content-Type", w.SITE_HEADER}
+    finally:
+        for hook in hooks:
+            with contextlib.suppress(DoesNotExistError):
+                client.delete(w.DOCTYPE_WEBHOOK, hook.name)
+
+
+def test_submitted_purchase_orders_list_and_read(client: Client) -> None:
+    from stolon.erpnext import purchase as p
+
+    rows = list(p.list_submitted_purchase_orders(client, modified_after=None, page_size=5))
+    if not rows:
+        pytest.skip("test site holds no submitted Purchase Orders")
+    po = p.read_purchase_order(client, rows[0]["name"])
+    # The listing deliberately includes cancelled documents, so the first row
+    # may be either; what matters is that a finalized document reads with lines.
+    assert (po.is_submitted or po.is_cancelled) and po.items
+
+
+def test_a_comment_lands_on_the_document_and_lists_back(note: tuple[Client, str, str]) -> None:
+    from stolon.erpnext.comment import add_comment, list_comments
+
+    client, name, _title = note
+    text = f"stolon live comment {uuid.uuid4()}"
+    created = add_comment(client, "Note", name, text)
+    assert created["reference_name"] == name
+    assert any(c["content"] == text for c in list_comments(client, "Note", name))

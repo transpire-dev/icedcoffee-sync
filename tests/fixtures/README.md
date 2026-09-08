@@ -238,3 +238,20 @@ detection.
   captures but do not demonstrate the error classes their original intent named
   — read their sections above before relying on either as evidence of an actual
   permission or duplicate error body.
+
+## `purchase_order_submitted.json`
+
+Captured 2026-09-03 by a one-off script against `example-demo-sites.invalid`
+(Acmebike's demo ERPNext site): `GET /api/v2/document/Purchase Order/<name>` for
+the Purchase Order carrying `transpire_order_no` `0001ABCD`, written raw and
+unstripped, as `read_purchase_order` needs to parse the real shape.
+
+Two fields were edited by hand after capture: **`docstatus`** (`0` → `1`) and
+**`status`** (`"Draft"` → `"To Receive and Bill"`). The captured PO is still a
+draft on the demo site — submitting it there needs a Supplier, an Item, and a
+fiscal year set up beyond what Task 6 provisions — but
+`test_erpnext_purchase.py` needs a fixture that reads as _submitted_ to exercise
+`PurchaseOrder.is_submitted`/`.is_cancelled` and the
+`order_confirmation_no`/`order_confirmation_date` fields the write-back plan
+sets on a submitted order. Every other field, including every `items` row, is
+exactly what the site returned.
