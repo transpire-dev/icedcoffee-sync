@@ -129,9 +129,8 @@ class DesiredItem:
 class DesiredPurchaseOrderItem:
     """One Purchase Order line.
 
-    `rate` is 0 on every line and that is not a placeholder to fill in later:
-    the order-graph projection carries no per-line price, and the connector
-    does not invent one. See the design document.
+    `rate` is the unit price in the site's company currency, or 0 when the
+    caller has no price it can vouch for: the connector never invents one.
     """
 
     item_code: str
@@ -139,7 +138,7 @@ class DesiredPurchaseOrderItem:
     description: str | None = None
     qty: int
     schedule_date: str
-    rate: int = 0
+    rate: float = 0
 
     def as_document(self) -> dict[str, Any]:
         return {
