@@ -33,3 +33,10 @@ def test_every_pushed_document_carries_the_source_marker() -> None:
 def test_supplier_ref_field_is_the_one_graft_creates() -> None:
     assert d.SUPPLIER_REF_FIELD in d.CUSTOM_FIELDS
     assert d.SUPPLIER_REF_FIELD.document_name == "Supplier-transpire_ref"
+
+
+def test_an_item_is_stock_maintained() -> None:
+    # These are bicycle parts a shop holds in inventory, not services. ERPNext
+    # writes no stock ledger entry for an item with Maintain Stock off, so a
+    # Purchase Receipt against one moves nothing.
+    assert d.DesiredItem(item_code="CN-1", item_name="CHAIN", description="CHAIN").as_document()["is_stock_item"] == 1
