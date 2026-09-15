@@ -105,8 +105,11 @@ class DesiredSupplier:
 class DesiredItem:
     """One Item, named by a deterministic slug so creating it is idempotent.
 
-    Non-stock on purpose: a stock item drags in a warehouse, a valuation rate
-    and a stock ledger, none of which this demo has anything to say about.
+    Stock-maintained: these are parts a shop holds in inventory, and ERPNext
+    writes no stock ledger entry for an item with Maintain Stock off -- so a
+    Purchase Receipt against a non-stock item moves nothing, which is the half
+    of the demo that matters. The warehouse and valuation rate this drags in
+    are answered by the site's company defaults and by the line's own rate.
     """
 
     item_code: str
@@ -120,7 +123,7 @@ class DesiredItem:
             "description": self.description or self.item_name,
             "item_group": DEFAULT_ITEM_GROUP,
             "stock_uom": DEFAULT_UOM,
-            "is_stock_item": 0,
+            "is_stock_item": 1,
             FIELD_SOURCE: SOURCE_MARKER,
         }
 
