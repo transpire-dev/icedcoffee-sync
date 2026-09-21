@@ -8,6 +8,7 @@ from stolon.frappe.errors import (
     DuplicateEntryError,
     FrappeError,
     LinkExistsError,
+    PermissionError_,
     RateLimitError,
     TimestampMismatchError,
     ValidationError,
@@ -134,3 +135,46 @@ def test_nested_set_child_exists_maps_to_child_exists_error() -> None:
     assert error.error_type == "NestedSetChildExistsError"
     assert error.status == 417
     assert "has child nodes" in error.message
+
+
+def test_unmapped_417_is_read_as_a_validation_failure() -> None:
+    # Measured against the live test site: inserting a Journal Entry for a
+    # company with perpetual inventory raises ERPNext's
+    # StockAccountInvalidTransaction, a frappe.ValidationError subclass this
+    # map has never heard of. Frappe answers every validation failure with
+    # 417, so the status says what the name does not.
+    error = error_from_response(
+        417,
+        _v2("StockAccountInvalidTransaction", "Account: Stock In Hand - AB can only be updated via Stock Transactions"),
+    )
+    assert isinstance(error, ValidationError)
+    assert error.error_type == "StockAccountInvalidTransaction"
+    assert error.status == 417
+    assert "can only be updated via Stock Transactions" in error.message
+
+
+def test_an_unmapped_type_at_another_status_stays_the_base_class() -> None:
+    # Only 417 means validation; a 500 carrying the same name is a site fault.
+    error = error_from_response(500, _v2("StockAccountInvalidTransaction", "the site fell over"))
+    assert type(error) is FrappeError
+    assert error.status == 500
+
+
+def test_a_permission_refusal_is_never_a_validation_error() -> None:
+    error = error_from_response(403, _v2("PermissionError", "Not permitted"))
+    assert isinstance(error, PermissionError_)
+    assert not isinstance(error, ValidationError)
+
+
+def test_legacy_exc_type_envelope_also_reads_417_as_validation() -> None:
+    # `/api/method/` endpoints answer with exc_type instead of an errors list;
+    # the status means the same thing on both surfaces.
+    body = json.dumps({
+        "exc_type": "StockAccountInvalidTransaction",
+        "_server_messages": json.dumps([
+            json.dumps({"message": "Account: Stock In Hand - AB can only be updated via Stock Transactions"})
+        ]),
+    })
+    error = error_from_response(417, body)
+    assert isinstance(error, ValidationError)
+    assert error.error_type == "StockAccountInvalidTransaction"

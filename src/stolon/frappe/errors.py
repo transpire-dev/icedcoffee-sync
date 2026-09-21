@@ -36,7 +36,13 @@ class FrappeError(Exception):
 
 
 class ValidationError(FrappeError):
-    """A document failed Frappe's validation."""
+    """A document failed Frappe's validation.
+
+    Raised for the named types below and for any error the site answers with
+    417 under a name this module does not know -- apps subclass
+    `frappe.ValidationError` for their own rules, and the status is the part
+    that stays put.
+    """
 
 
 class PermissionError_(FrappeError):
@@ -80,6 +86,10 @@ class TimestampMismatchError(FrappeError):
 class RateLimitError(FrappeError):
     """The site is rate limiting us."""
 
+
+# Frappe's status for a validation failure: `frappe.ValidationError` and every
+# subclass an app defines answer 417 (`http_status_code` on the exception).
+_VALIDATION_STATUS = 417
 
 _BY_TYPE: dict[str, type[FrappeError]] = {
     "ValidationError": ValidationError,
@@ -168,6 +178,19 @@ def error_from_response(status: int, body: str) -> FrappeError:
         cls: type[FrappeError] = RateLimitError
     else:
         cls = _BY_TYPE.get(str(error_type), FrappeError)
+        if cls is FrappeError and status == _VALIDATION_STATUS:
+            # Frappe answers a validation failure with 417 whatever the
+            # exception is called, and apps raise their own
+            # `frappe.ValidationError` subclasses freely -- ERPNext's
+            # `StockAccountInvalidTransaction` ("Account: Stock In Hand - AB
+            # can only be updated via Stock Transactions", measured live), and
+            # one per app after that. Naming them all is a losing race, so an
+            # unrecognised name at this status is read as what the status
+            # means. The map still wins where it has an entry: a
+            # `NestedSetChildExistsError` is a 417 that is not a validation
+            # failure, and a `PermissionError` is a 403 that must never
+            # become one.
+            cls = ValidationError
 
     return cls(
         message,

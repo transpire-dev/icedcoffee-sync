@@ -338,10 +338,13 @@ def probe_submit(config: SiteConfig, *, company: str) -> SubmitProbe:
 def _probe_create(client: Client, company: str) -> PermissionError_ | None:
     """Prove create access against `company` with a real draft; None means proven.
 
-    Reaching validation (`ValidationError`, for the missing `accounts` rows)
-    proves it; a `PermissionError_` is returned for the caller to report;
-    anything else -- a rate limit, a 5xx -- propagates, since it answers
-    nothing. A draft that unexpectedly lands is deleted at once.
+    Reaching validation (`ValidationError`) proves it -- for the missing
+    `accounts` rows, or for whatever else the company's setup objects to
+    first (on a perpetual-inventory company, ERPNext's
+    `StockAccountInvalidTransaction`, read as a validation failure from its
+    417); a `PermissionError_` is returned for the caller to report; anything
+    else -- a rate limit, a 5xx -- propagates, since it answers nothing. A
+    draft that unexpectedly lands is deleted at once.
     """
     try:
         draft = client.insert(
