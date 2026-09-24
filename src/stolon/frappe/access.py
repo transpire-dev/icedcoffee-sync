@@ -54,15 +54,18 @@ PROBE_DOCTYPE = "Journal Entry"
 
 @dataclasses.dataclass(frozen=True)
 class PermissionGrant:
-    """The flags to turn on for one doctype; `grant` writes every other flag as "0"."""
+    """The flags to turn on for one doctype at one permission level; `grant` writes every other flag as "0"."""
 
     doctype: str
     ptypes: frozenset[str]
+    permlevel: int = 0
 
     def __post_init__(self) -> None:
         unknown = sorted(self.ptypes - PTYPES)
         if unknown:
             raise ValueError(f"not a managed permission type: {', '.join(unknown)}; PTYPES is {sorted(PTYPES)}")
+        if self.permlevel < 0:
+            raise ValueError(f"permlevel must be 0 or more, not {self.permlevel}")
 
 
 class _AccessClient(Protocol):
@@ -113,35 +116,39 @@ def grant(client: _AccessClient, role: str, permission_grant: PermissionGrant) -
     Explicit zeros are the point: a flag left unmentioned would depend on a
     default this module does not control. Returns the (ptype, value) pairs sent.
     """
-    # `add` is a no-op when the (doctype, role, permlevel 0) row already exists.
+    # `add` is a no-op when the (doctype, role, permlevel) row already exists.
     client.call(
         f"{_PERMISSION_MANAGER}.add",
-        {"parent": permission_grant.doctype, "role": role, "permlevel": 0},
+        {"parent": permission_grant.doctype, "role": role, "permlevel": permission_grant.permlevel},
     )
     sent: list[tuple[str, str]] = []
     for ptype in sorted(PTYPES | _ALWAYS_RESET_TO_ZERO):
         value = "1" if ptype in permission_grant.ptypes else "0"
         client.call(
             f"{_PERMISSION_MANAGER}.update",
-            {"doctype": permission_grant.doctype, "role": role, "permlevel": 0, "ptype": ptype, "value": value},
+            {
+                "doctype": permission_grant.doctype,
+                "role": role,
+                "permlevel": permission_grant.permlevel,
+                "ptype": ptype,
+                "value": value,
+            },
         )
         sent.append((ptype, value))
     return sent
 
 
-def revoke_grants_except(client: _AccessClient, role: str, keep: frozenset[str]) -> list[str]:
-    """Revoke every permission row `role` holds except permlevel-0 rows on doctypes in `keep`.
+def revoke_grants_except(client: _AccessClient, role: str, keep: frozenset[tuple[str, int]]) -> list[str]:
+    """Revoke every permission row `role` holds except rows whose (doctype, permlevel) is in `keep`.
 
-    `grant` only ever manages permlevel 0, so a row at any other permlevel
-    is revoked whatever its doctype -- it could carry flags nothing here
-    wrote. Returns a label per revoked row.
+    Returns a label per revoked row.
     """
     rows = client.call(f"{_PERMISSION_MANAGER}.get_permissions", {"role": role})
     revoked: list[str] = []
     for row in rows:
         doctype = row["parent"]
         permlevel = row["permlevel"]
-        if doctype in keep and permlevel == 0:
+        if (doctype, permlevel) in keep:
             continue
         label = doctype if permlevel == 0 else f"{doctype} (permlevel {permlevel})"
         # Frappe refuses to remove a doctype's last permission rule; that
@@ -286,6 +293,14 @@ def granted_flags_effective(config: SiteConfig, *, doctype: str, ptypes: frozens
     A Custom DocPerm row that exists and reads back is not proof it takes
     effect -- a `read` row on `DocType` does not, measured live -- so a
     positive grant is checked the same way a prohibited one is.
+
+    **Blind to permlevel.** `frappe.client.has_permission` answers a
+    doctype-level question and takes no permlevel of its own, so this cannot
+    tell a permlevel-1 DocPerm row's presence from a permlevel-0 grant
+    already on the same doctype -- a caller that asks this about a
+    permlevel-1 grant gets back "effective" whether or not that row exists.
+    Proving a grant above permlevel 0 needs a real round trip of a value
+    through the credential instead; do not call this for one.
     """
     with Client(config) as client:
         return {ptype: _has_permission(client, doctype, ptype) for ptype in sorted(ptypes)}
