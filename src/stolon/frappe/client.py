@@ -45,6 +45,82 @@ _COMMITTING_METHODS = frozenset({
 })
 
 
+class FileDownloadError(RuntimeError):
+    """A site file could not be fetched, or was larger than the caller allows."""
+
+
+_FILE_PREFIXES = ("/files/", "/private/files/")
+
+# A scheme's port when a URL names none explicitly. httpx2.URL already
+# collapses an *explicit* default (":443" on an https URL) down to `None`
+# for `.port`, so comparing `.port` alone already treats an implicit and an
+# explicit default the same -- this table is what makes that comparison
+# explicit and independent of that normalization, rather than relying on it.
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _effective_port(url: httpx2.URL) -> int | None:
+    """`url`'s port, or its scheme's default when none was given -- so an implicit and an explicit default port compare equal."""
+    return url.port if url.port is not None else _DEFAULT_PORTS.get(url.scheme)
+
+
+def _validate_file_url(file_url: str, site_url: str) -> None:
+    """Validate a file_url before downloading.
+
+    Rejects paths with query strings, fragments, backslashes, or dot-segments
+    (both literal and percent-encoded), then builds the full URL and checks
+    that its normalized scheme, host, port, and path are safe.
+    """
+    # The raw file_url must itself start with an allowed prefix -- before it
+    # is glued onto site_url and parsed. Without this, a file_url like
+    # ":8443/files/x" has no leading "/" at all: concatenated onto
+    # "https://site.example" it becomes "https://site.example:8443/files/x",
+    # a PORT change rather than a path. The *parsed* URL's host still matches
+    # and its path still starts with "/files/", so the checks below alone
+    # would wave it through onto a different origin at the same hostname.
+    if not file_url.startswith(_FILE_PREFIXES):
+        raise ValueError(f"not a site file path: {file_url!r}")
+
+    # Reject obviously bad characters before parsing
+    if "?" in file_url or "#" in file_url or "\\" in file_url:
+        raise ValueError(f"not a site file path: {file_url!r}")
+
+    # Reject literal dot-segments like /.. or /./ as path components
+    # (before URL parsing, to catch them before normalization)
+    parts = file_url.split("/")
+    if "." in parts or ".." in parts or any("%2e" in part for part in parts):
+        raise ValueError(f"not a site file path: {file_url!r}")
+
+    # Build the full URL and parse it
+    full_url = f"{site_url.rstrip('/')}{file_url}"
+    url = httpx2.URL(full_url)
+
+    # Extract the site's host from its URL
+    site_url_obj = httpx2.URL(site_url)
+
+    # Check scheme, host, and effective port all match the configured site.
+    # Host alone is not enough: an off-port file_url like ":8443/files/x"
+    # (caught above already, but the check stays here as the real boundary
+    # the request itself crosses) leaves the host unchanged while sending
+    # the credential to a different origin.
+    if (
+        url.scheme != site_url_obj.scheme
+        or url.host != site_url_obj.host
+        or _effective_port(url) != _effective_port(site_url_obj)
+    ):
+        raise ValueError(f"not a site file path: {file_url!r}")
+
+    # Check normalized path starts with allowed prefixes and has no dot-segments
+    path = url.path
+    if not path.startswith(_FILE_PREFIXES):
+        raise ValueError(f"not a site file path: {file_url!r}")
+
+    # Check for dot-segments in the normalized path (catches %2e%2e that gets decoded)
+    path_parts = path.split("/")
+    if "." in path_parts or ".." in path_parts:
+        raise ValueError(f"not a site file path: {file_url!r}")
+
+
 @dataclasses.dataclass(frozen=True)
 class SiteConfig:
     """Where a Frappe site is and how to authenticate to it.
@@ -280,6 +356,29 @@ class Client:
             # fewer rows while still reporting has_next_page: true, and
             # advancing by page_size would skip the rows it never sent.
             start += len(rows)
+
+    def download_file(self, file_url: str, *, max_bytes: int) -> bytes:
+        """The bytes a `File` document's `file_url` names, private files included.
+
+        Only site-relative `/files/` and `/private/files/` paths: a `file_url`
+        is data a person can edit, and following it off-site would hand the
+        credential to whoever it names. Validates against dot-segments and
+        off-site URLs before sending any request. Streamed and capped at
+        `max_bytes`.
+        """
+        _validate_file_url(file_url, self._config.url)
+        args = _send_args(self._config, req.Request("GET", file_url))
+        with self._http.stream("GET", args["url"], headers=args["headers"]) as response:
+            if response.status_code != 200:
+                raise FileDownloadError(f"{file_url}: HTTP {response.status_code}")
+            chunks: list[bytes] = []
+            size = 0
+            for chunk in response.iter_bytes():
+                size += len(chunk)
+                if size > max_bytes:
+                    raise FileDownloadError(f"{file_url}: larger than {max_bytes} bytes")
+                chunks.append(chunk)
+        return b"".join(chunks)
 
 
 class AsyncClient:

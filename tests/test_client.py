@@ -94,7 +94,9 @@ def test_caller_headers_cannot_replace_the_credential() -> None:
 
 def test_both_clients_expose_the_same_method_names() -> None:
     public = {n for n in dir(Client) if not n.startswith("_")}
-    assert public == {n for n in dir(AsyncClient) if not n.startswith("_")}
+    async_public = {n for n in dir(AsyncClient) if not n.startswith("_")}
+    # download_file is sync-only: untested async code with unnecessary security surface
+    assert public - {"download_file"} == async_public
 
 
 def test_async_client_methods_are_actually_async() -> None:
@@ -115,6 +117,9 @@ def test_both_clients_take_the_same_parameters() -> None:
     import inspect
 
     for name in (n for n in dir(Client) if not n.startswith("_")):
+        # download_file is sync-only: untested async code with unnecessary security surface
+        if name == "download_file":
+            continue
         sync_attribute = getattr(Client, name)
         async_attribute = getattr(AsyncClient, name)
         if not (callable(sync_attribute) and callable(async_attribute)):
