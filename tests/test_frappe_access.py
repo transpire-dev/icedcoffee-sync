@@ -77,6 +77,16 @@ def test_permission_grant_rejects_an_unmanaged_ptype() -> None:
         PermissionGrant("Account", frozenset({"if_owner"}))
 
 
+def test_permission_grant_defaults_to_permlevel_zero() -> None:
+    g = PermissionGrant("Account", frozenset({"read"}))
+    assert g.permlevel == 0
+
+
+def test_permission_grant_rejects_a_negative_permlevel() -> None:
+    with pytest.raises(ValueError, match="permlevel"):
+        PermissionGrant("Account", frozenset({"read"}), permlevel=-1)
+
+
 # --- ensure_role -------------------------------------------------------
 
 
@@ -211,6 +221,21 @@ def test_grant_update_calls_name_the_doctype_role_and_permlevel() -> None:
         assert params["permlevel"] == 0
 
 
+def test_grant_sends_a_nonzero_permlevel_on_the_add_and_every_update_call() -> None:
+    client = RecordingClient()
+    grant(client, "Transpire Books Bot", PermissionGrant("Company", frozenset({"read"}), permlevel=1))
+
+    add_calls = [c for c in client.calls if c[0] == f"{_PERMISSION_MANAGER}.add"]
+    assert add_calls == [
+        (f"{_PERMISSION_MANAGER}.add", {"parent": "Company", "role": "Transpire Books Bot", "permlevel": 1})
+    ]
+
+    update_calls = [c[1] for c in client.calls if c[0] == f"{_PERMISSION_MANAGER}.update"]
+    assert update_calls, "grant must still send every managed ptype"
+    for params in update_calls:
+        assert params["permlevel"] == 1
+
+
 # --- revoke_grants_except -------------------------------------------------------
 
 
@@ -239,7 +264,7 @@ def test_revoke_grants_except_removes_doctypes_outside_keep() -> None:
         {"parent": "Account", "permlevel": 0},
         {"parent": "DocType", "permlevel": 0},
     ])
-    revoked = revoke_grants_except(client, "Transpire Books Bot", keep=frozenset({"Account"}))
+    revoked = revoke_grants_except(client, "Transpire Books Bot", keep=frozenset({("Account", 0)}))
     assert revoked == ["DocType"]
     remove_calls = [c for c in client.calls if c[0] == f"{_PERMISSION_MANAGER}.remove"]
     assert remove_calls == [
@@ -252,7 +277,24 @@ def test_revoke_grants_except_removes_a_nonzero_permlevel_row_on_an_allowed_doct
         {"parent": "Account", "permlevel": 0},
         {"parent": "Account", "permlevel": 1},
     ])
-    revoked = revoke_grants_except(client, "Transpire Books Bot", keep=frozenset({"Account"}))
+    revoked = revoke_grants_except(client, "Transpire Books Bot", keep=frozenset({("Account", 0)}))
+    assert revoked == ["Account (permlevel 1)"]
+    remove_calls = [c for c in client.calls if c[0] == f"{_PERMISSION_MANAGER}.remove"]
+    assert remove_calls == [
+        (f"{_PERMISSION_MANAGER}.remove", {"doctype": "Account", "role": "Transpire Books Bot", "permlevel": 1})
+    ]
+
+
+def test_revoke_grants_except_keeps_a_granted_nonzero_permlevel_row() -> None:
+    # The point of this task: a role granted Company at permlevel 1 must
+    # survive the next provision run, not be revoked alongside every other
+    # nonzero-permlevel row.
+    client = _RevokeClient([
+        {"parent": "Company", "permlevel": 0},
+        {"parent": "Company", "permlevel": 1},
+        {"parent": "Account", "permlevel": 1},
+    ])
+    revoked = revoke_grants_except(client, "Transpire Books Bot", keep=frozenset({("Company", 0), ("Company", 1)}))
     assert revoked == ["Account (permlevel 1)"]
     remove_calls = [c for c in client.calls if c[0] == f"{_PERMISSION_MANAGER}.remove"]
     assert remove_calls == [
@@ -262,14 +304,14 @@ def test_revoke_grants_except_removes_a_nonzero_permlevel_row_on_an_allowed_doct
 
 def test_revoke_grants_except_asks_get_permissions_for_this_role() -> None:
     client = _RevokeClient([{"parent": "Account", "permlevel": 0}])
-    revoke_grants_except(client, "Transpire Books Bot", keep=frozenset({"Account"}))
+    revoke_grants_except(client, "Transpire Books Bot", keep=frozenset({("Account", 0)}))
     get_calls = [c for c in client.calls if c[0] == f"{_PERMISSION_MANAGER}.get_permissions"]
     assert get_calls == [(f"{_PERMISSION_MANAGER}.get_permissions", {"role": "Transpire Books Bot"})]
 
 
 def test_revoke_grants_except_returns_empty_when_nothing_to_revoke() -> None:
     client = _RevokeClient([{"parent": "Account", "permlevel": 0}, {"parent": "Company", "permlevel": 0}])
-    revoked = revoke_grants_except(client, "Transpire Books Bot", keep=frozenset({"Account", "Company"}))
+    revoked = revoke_grants_except(client, "Transpire Books Bot", keep=frozenset({("Account", 0), ("Company", 0)}))
     assert revoked == []
     assert not [c for c in client.calls if c[0] == f"{_PERMISSION_MANAGER}.remove"]
 
