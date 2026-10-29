@@ -3,7 +3,7 @@
 from typing import Any
 
 import pytest
-from stolon.apply.diff import (
+from icedcoffee_sync.apply.diff import (
     ChartPlan,
     CreateAccount,
     EnableAccount,
@@ -12,8 +12,8 @@ from stolon.apply.diff import (
     RenameAccount,
     RetypeAccount,
 )
-from stolon.apply.execute import PlanRefusedError, apply_chart
-from stolon.apply.model import DesiredAccount, LiveAccount
+from icedcoffee_sync.apply.execute import PlanRefusedError, apply_chart
+from icedcoffee_sync.apply.model import DesiredAccount, LiveAccount
 
 
 def desired(number, name, parent=None, is_group=False, account_type=None):
@@ -252,7 +252,7 @@ def test_enable_uses_the_renamed_documents_current_name() -> None:
 
 
 def test_extras_are_never_touched() -> None:
-    from stolon.apply.diff import ExtraAccount
+    from icedcoffee_sync.apply.diff import ExtraAccount
 
     plan = ChartPlan([], [], [], [ExtraAccount(live("Buildings - AB", "Buildings"))], [])
     client = FakeClient()

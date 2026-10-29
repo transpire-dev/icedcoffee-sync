@@ -2,7 +2,7 @@
 
 The constants here are a snapshot of ERPNext 16's Select options, measured on
 2026-08-25. They exist so a chart can be validated offline, before any request
-is sent. `stolon.erpnext.accounts.live_account_types` reads the same list from
+is sent. `icedcoffee_sync.erpnext.accounts.live_account_types` reads the same list from
 a running site, and a live test asserts the two agree -- that is what catches an
 ERPNext upgrade adding or removing a type.
 """
@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any, Protocol
 
-from stolon.apply.model import LiveAccount
+from icedcoffee_sync.apply.model import LiveAccount
 
 ROOT_TYPES: frozenset[str] = frozenset({"Asset", "Liability", "Income", "Expense", "Equity"})
 

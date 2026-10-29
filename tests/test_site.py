@@ -1,8 +1,7 @@
 """The URL checks every ERPNext site URL passes, allowlist or not."""
 
 import pytest
-
-from stolon import site
+from icedcoffee_sync import site
 
 
 def test_userinfo_is_refused_before_anything_and_never_echoed() -> None:
@@ -12,16 +11,22 @@ def test_userinfo_is_refused_before_anything_and_never_echoed() -> None:
     assert "credential" in str(excinfo.value)
 
 
-def test_a_refused_host_is_refused_by_name() -> None:
-    with pytest.raises(site.SiteUrlRefusedError, match="books site"):
-        site.require_safe_site_url(f"https://{site.BOOKS_SITE_HOST}", refused_hosts=frozenset({site.BOOKS_SITE_HOST}))
+LEDGER = {"ledger.example": "the ledger"}
+
+
+def test_a_refused_host_is_refused_by_the_name_the_caller_gave_it() -> None:
+    with pytest.raises(site.SiteUrlRefusedError) as excinfo:
+        site.require_safe_site_url("https://ledger.example.", refused_hosts=LEDGER)
+    assert str(excinfo.value) == "refusing the ledger 'ledger.example'"
 
 
 def test_a_fully_qualified_refused_host_is_still_refused() -> None:
-    with pytest.raises(site.SiteUrlRefusedError, match="books site"):
-        site.require_safe_site_url(
-            f"https://{site.BOOKS_SITE_HOST}./x", refused_hosts=frozenset({site.BOOKS_SITE_HOST})
-        )
+    with pytest.raises(site.SiteUrlRefusedError, match="the ledger"):
+        site.require_safe_site_url("https://ledger.example./x", refused_hosts=LEDGER)
+
+
+def test_the_library_does_not_know_any_ledger_host() -> None:
+    assert "BOOKS_SITE_HOST" not in dir(site)
 
 
 def test_plain_http_is_refused() -> None:

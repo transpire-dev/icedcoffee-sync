@@ -12,9 +12,9 @@ from typing import Any, Self
 
 import httpx2
 
-from stolon.frappe import request as req
-from stolon.frappe.lifecycle import SubmitNotPermittedError
-from stolon.frappe.response import envelope, has_next_page, unwrap
+from icedcoffee_sync.frappe import request as req
+from icedcoffee_sync.frappe.lifecycle import SubmitNotPermittedError
+from icedcoffee_sync.frappe.response import envelope, has_next_page, unwrap
 
 # Both clients define a public `list` method, which shadows the builtin
 # `list` type within their class bodies under Python 3.14's lazy annotation

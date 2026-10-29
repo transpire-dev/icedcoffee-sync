@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from stolon.frappe.errors import DoesNotExistError
+from icedcoffee_sync.frappe.errors import DoesNotExistError
 
 
 class _Writer(Protocol):

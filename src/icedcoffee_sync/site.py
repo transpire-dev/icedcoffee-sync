@@ -13,10 +13,9 @@ quotes the URL back and a password typed into it must never reach stderr.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
 from urllib.parse import urlsplit
-
-# The real ledger. Named here so every caller refuses it the same way.
-BOOKS_SITE_HOST = "transpire.frappe.cloud"
 
 HTTPS_PORT = 443
 
@@ -34,14 +33,14 @@ def hostname(url: str) -> str:
     return (urlsplit(url).hostname or "").lower().rstrip(".")
 
 
-def require_safe_site_url(url: str, *, refused_hosts: frozenset[str] = frozenset()) -> None:
+def require_safe_site_url(url: str, *, refused_hosts: Mapping[str, str] = MappingProxyType({})) -> None:
     """Refuse a URL that carries a credential, is not https on 443, or names a refused host.
 
     Args:
         url: The site URL as the operator typed it.
         refused_hosts: Hosts refused by name, ahead of every other check, so
-            the message says why rather than "not allowed". Callers pass the
-            books site here.
+            the message says why rather than "not allowed". Maps each host to
+            the words that name it in the refusal ("the ledger").
 
     Raises:
         SiteUrlRefusedError: With a message that never contains userinfo.
@@ -53,8 +52,7 @@ def require_safe_site_url(url: str, *, refused_hosts: frozenset[str] = frozenset
     if not host:
         raise SiteUrlRefusedError(f"refusing {url!r}: no hostname")
     if host in refused_hosts:
-        label = "the books site" if host == BOOKS_SITE_HOST else "a refused host"
-        raise SiteUrlRefusedError(f"refusing {label} {host!r}")
+        raise SiteUrlRefusedError(f"refusing {refused_hosts[host]} {host!r}")
     if parts.scheme != "https":
         raise SiteUrlRefusedError(f"refusing {url!r}: the API key rides in a header, so the scheme must be https")
     try:

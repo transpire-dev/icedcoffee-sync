@@ -2,7 +2,7 @@ import json
 import pathlib
 
 import pytest
-from stolon.frappe.errors import (
+from icedcoffee_sync.frappe.errors import (
     ChildExistsError,
     DoesNotExistError,
     DuplicateEntryError,

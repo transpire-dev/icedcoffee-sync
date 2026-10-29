@@ -1,8 +1,8 @@
 """Capture real Frappe v2 responses as fixtures. Run by hand, not by pytest.
 
 Usage:
-    STOLON_TEST_URL=https://<disposable-site>.frappe.cloud \
-    STOLON_TEST_KEY=... STOLON_TEST_SECRET=... \
+    ICEDCOFFEE_TEST_URL=https://<disposable-site>.frappe.cloud \
+    ICEDCOFFEE_TEST_KEY=... ICEDCOFFEE_TEST_SECRET=... \
     uv run python tests/capture_fixtures.py
 
 Writes one file per scenario into tests/fixtures/, containing the status code,
@@ -28,7 +28,7 @@ import httpx2
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 
 # Mirrors the guard in tests/test_live_frappe.py: this script writes junk
-# documents to whatever STOLON_TEST_URL points at, so it must refuse the
+# documents to whatever ICEDCOFFEE_TEST_URL points at, so it must refuse the
 # books site before sending a single request. Matches the hostname only --
 # a custom-domain alias pointed at the same site would not be caught, so
 # don't over-trust it as a complete guard.
@@ -44,9 +44,9 @@ def _require_not_books_site(url: str) -> None:
 
 
 def main() -> None:
-    base = os.environ["STOLON_TEST_URL"].rstrip("/")
+    base = os.environ["ICEDCOFFEE_TEST_URL"].rstrip("/")
     _require_not_books_site(base)
-    auth = f"token {os.environ['STOLON_TEST_KEY']}:{os.environ['STOLON_TEST_SECRET']}"
+    auth = f"token {os.environ['ICEDCOFFEE_TEST_KEY']}:{os.environ['ICEDCOFFEE_TEST_SECRET']}"
     headers = {"Authorization": auth, "Accept": "application/json"}
     FIXTURES.mkdir(exist_ok=True)
 

@@ -1,6 +1,6 @@
 """The ERPNext document shapes shared by graft and phloem."""
 
-from stolon.erpnext import documents as d
+from icedcoffee_sync.erpnext import documents as d
 
 
 def test_custom_field_is_named_the_way_frappe_names_it() -> None:

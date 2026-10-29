@@ -17,8 +17,8 @@ import dataclasses
 import enum
 from typing import Any, Protocol
 
-from stolon.apply.model import LiveAccount
-from stolon.frappe.errors import ChildExistsError, FrappeError, LinkExistsError, ValidationError
+from icedcoffee_sync.apply.model import LiveAccount
+from icedcoffee_sync.frappe.errors import ChildExistsError, FrappeError, LinkExistsError, ValidationError
 
 
 class PruneReason(enum.StrEnum):

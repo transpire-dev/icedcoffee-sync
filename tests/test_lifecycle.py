@@ -3,8 +3,8 @@ from typing import Any
 
 import httpx2
 import pytest
-from stolon.frappe.client import AsyncClient, Client, SiteConfig
-from stolon.frappe.lifecycle import DocStatus, SubmitNotPermittedError
+from icedcoffee_sync.frappe.client import AsyncClient, Client, SiteConfig
+from icedcoffee_sync.frappe.lifecycle import DocStatus, SubmitNotPermittedError
 
 DRAFTS_ONLY = SiteConfig(url="https://example.test", api_key="K", api_secret="S")  # noqa: S106
 MAY_SUBMIT = SiteConfig(

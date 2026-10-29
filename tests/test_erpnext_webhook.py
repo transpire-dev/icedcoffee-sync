@@ -2,7 +2,7 @@
 
 import json
 
-from stolon.erpnext import webhook as w
+from icedcoffee_sync.erpnext import webhook as w
 
 SECRET = "7dc9c9544e17e1867efde0506bca3dacaaa5d11f661560591bc1acf0924e8c86"
 
@@ -47,7 +47,7 @@ def test_the_secret_never_appears_in_the_repr() -> None:
 
 
 def test_ensure_creates_the_missing_ones_and_reasserts_the_rest() -> None:
-    from stolon.frappe.errors import DoesNotExistError
+    from icedcoffee_sync.frappe.errors import DoesNotExistError
 
     class Site:
         def __init__(self) -> None:

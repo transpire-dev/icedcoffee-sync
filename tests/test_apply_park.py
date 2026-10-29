@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from stolon.apply.model import LiveAccount
-from stolon.apply.park import ParkedNumber, park_colliding_numbers, parking_candidates, unresolved_collisions
-from stolon.apply.prune import PruneReason, PruneRefusal, PruneReport
+from icedcoffee_sync.apply.model import LiveAccount
+from icedcoffee_sync.apply.park import ParkedNumber, park_colliding_numbers, parking_candidates, unresolved_collisions
+from icedcoffee_sync.apply.prune import PruneReason, PruneRefusal, PruneReport
 
 
 def survivor(document_name: str, number: str, name: str, parent: str | None = "Expenses - T") -> LiveAccount:

@@ -7,8 +7,8 @@ a test that says nothing about roots produces no root changes.
 """
 
 import pytest
-from stolon.apply.diff import RefusalReason, diff
-from stolon.apply.model import DesiredAccount, LiveAccount
+from icedcoffee_sync.apply.diff import RefusalReason, diff
+from icedcoffee_sync.apply.model import DesiredAccount, LiveAccount
 
 ROOT_NUMBER = "5000"
 ROOT_DOCUMENT = "5000 - Expenses - AB"

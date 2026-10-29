@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
-from stolon.erpnext.accounts import accounts_with_entries, company_abbr, read_chart
+from icedcoffee_sync.erpnext.accounts import accounts_with_entries, company_abbr, read_chart
 
 # FakeClient defines a public `list` method, which shadows the builtin `list`
 _Rows = list[dict[str, Any]]

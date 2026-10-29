@@ -3,7 +3,7 @@
 from typing import Any
 
 import pytest
-from stolon.erpnext.company import (
+from icedcoffee_sync.erpnext.company import (
     DefaultNotAppliedError,
     UnknownCompanyFieldError,
     clear_defaults_pointing_at,

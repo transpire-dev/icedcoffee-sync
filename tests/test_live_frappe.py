@@ -1,6 +1,6 @@
 """Live tests against a real Frappe site.
 
-Skipped unless STOLON_TEST_* is set. Points at the integration instance, never
+Skipped unless ICEDCOFFEE_TEST_* is set. Points at the integration instance, never
 at the books site -- the fixture asserts that rather than trusting the operator.
 """
 
@@ -11,9 +11,9 @@ from collections.abc import Iterator
 from urllib.parse import urlsplit
 
 import pytest
-from stolon.frappe.client import Client, SiteConfig
-from stolon.frappe.errors import DoesNotExistError
-from stolon.frappe.lifecycle import DocStatus, SubmitNotPermittedError
+from icedcoffee_sync.frappe.client import Client, SiteConfig
+from icedcoffee_sync.frappe.errors import DoesNotExistError
+from icedcoffee_sync.frappe.lifecycle import DocStatus, SubmitNotPermittedError
 
 pytestmark = pytest.mark.live_frappe
 
@@ -37,11 +37,11 @@ def _is_test_site(url: str) -> bool:
 
 @pytest.fixture
 def client() -> Iterator[Client]:
-    url = os.environ.get("STOLON_TEST_URL")
-    key = os.environ.get("STOLON_TEST_KEY")
-    secret = os.environ.get("STOLON_TEST_SECRET")
+    url = os.environ.get("ICEDCOFFEE_TEST_URL")
+    key = os.environ.get("ICEDCOFFEE_TEST_KEY")
+    secret = os.environ.get("ICEDCOFFEE_TEST_SECRET")
     if not (url and key and secret):
-        pytest.skip("STOLON_TEST_URL/KEY/SECRET not set")
+        pytest.skip("ICEDCOFFEE_TEST_URL/KEY/SECRET not set")
     if not _is_test_site(url):
         # Fail, never skip. A skip here would read as "nothing to run" while
         pytest.fail(f"refusing to run tests against a host not in _TEST_SITE_HOSTS: {url}")
@@ -125,7 +125,7 @@ def note(client: Client) -> Iterator[tuple[Client, str, str]]:
     though Frappe's own `name` for a Note is a server-assigned hash rather
     than something this client controls.
     """
-    title = f"stolon-live-test-{uuid.uuid4()}"
+    title = f"icedcoffee-sync-live-test-{uuid.uuid4()}"
     doc = client.insert("Note", {"title": title, "content": "<p>before</p>"})
     name = doc["name"]
     try:
@@ -196,7 +196,7 @@ def _minimal_pdf_bytes() -> bytes:
 
 def test_checked_in_account_types_match_the_site(client: Client) -> None:
     # The offline snapshot is what lets a chart be validated without a network
-    from stolon.erpnext.accounts import ACCOUNT_TYPES, live_account_types
+    from icedcoffee_sync.erpnext.accounts import ACCOUNT_TYPES, live_account_types
 
     live = live_account_types(client)
     assert live == ACCOUNT_TYPES, {
@@ -207,7 +207,7 @@ def test_checked_in_account_types_match_the_site(client: Client) -> None:
 
 def test_upload_file_attaches_a_private_file_to_a_document(client: Client) -> None:
     # Note over Account for the same reason the `note` fixture picks it:
-    title = f"stolon-live-test-{uuid.uuid4()}"
+    title = f"icedcoffee-sync-live-test-{uuid.uuid4()}"
     note = client.insert("Note", {"title": title, "content": "<p>upload target</p>"})
     note_name = note["name"]
     file_name: str | None = None
@@ -234,7 +234,7 @@ def test_upload_file_attaches_a_private_file_to_a_document(client: Client) -> No
 
 
 def test_a_webhook_provisions_idempotently_and_is_deletable(client: Client) -> None:
-    from stolon.erpnext import webhook as w
+    from icedcoffee_sync.erpnext import webhook as w
 
     site_id = f"live-{uuid.uuid4().hex[:8]}"
     hooks = w.purchase_order_webhooks(site_id=site_id, request_url="https://example.invalid/frappe", secret="x" * 64)
@@ -253,7 +253,7 @@ def test_a_webhook_provisions_idempotently_and_is_deletable(client: Client) -> N
 
 
 def test_submitted_purchase_orders_list_and_read(client: Client) -> None:
-    from stolon.erpnext import purchase as p
+    from icedcoffee_sync.erpnext import purchase as p
 
     rows = list(p.list_submitted_purchase_orders(client, modified_after=None, page_size=5))
     if not rows:
@@ -265,10 +265,10 @@ def test_submitted_purchase_orders_list_and_read(client: Client) -> None:
 
 
 def test_a_comment_lands_on_the_document_and_lists_back(note: tuple[Client, str, str]) -> None:
-    from stolon.erpnext.comment import add_comment, list_comments
+    from icedcoffee_sync.erpnext.comment import add_comment, list_comments
 
     client, name, _title = note
-    text = f"stolon live comment {uuid.uuid4()}"
+    text = f"icedcoffee-sync live comment {uuid.uuid4()}"
     created = add_comment(client, "Note", name, text)
     assert created["reference_name"] == name
     assert any(c["content"] == text for c in list_comments(client, "Note", name))

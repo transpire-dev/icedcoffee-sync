@@ -1,8 +1,9 @@
 # Fixture capture: Frappe v2 REST API on `transpire-test.frappe.cloud`
 
-Captured 2026-08-24 by `stolon/tests/capture_fixtures.py` against a disposable
-ERPNext v16 site ("Acmebike Cycling" company), key scoped for that site only.
-Six scenario files, one per named fixture. Status codes actually observed:
+Captured 2026-08-24 by `icedcoffee-sync/tests/capture_fixtures.py` against a
+disposable ERPNext v16 site ("Acmebike Cycling" company), key scoped for that
+site only. Six scenario files, one per named fixture. Status codes actually
+observed:
 
 | scenario                  | intent                | status | what actually happened                                                         |
 | ------------------------- | --------------------- | ------ | ------------------------------------------------------------------------------ |
