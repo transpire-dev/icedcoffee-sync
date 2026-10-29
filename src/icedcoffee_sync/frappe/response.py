@@ -9,7 +9,7 @@ during a sync, so it is preserved rather than flattened onto None.
 import json
 from typing import Any, Final
 
-from stolon.frappe.errors import FrappeError, error_from_response
+from icedcoffee_sync.frappe.errors import FrappeError, error_from_response
 
 
 class _Missing:

@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from stolon.frappe.request import (
+from icedcoffee_sync.frappe.request import (
     auth_header,
     call_method,
     delete_document,

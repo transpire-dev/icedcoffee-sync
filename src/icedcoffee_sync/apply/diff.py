@@ -17,7 +17,7 @@ import dataclasses
 import enum
 from collections.abc import Iterator
 
-from stolon.apply.model import DesiredAccount, LiveAccount, MatchKey
+from icedcoffee_sync.apply.model import DesiredAccount, LiveAccount, MatchKey
 
 
 class RefusalReason(enum.StrEnum):

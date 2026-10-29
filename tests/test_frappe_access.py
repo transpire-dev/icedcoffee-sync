@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from stolon.frappe.access import (
+from icedcoffee_sync.frappe.access import (
     _ALWAYS_RESET_TO_ZERO,
     _PERMISSION_MANAGER,
     PTYPES,
@@ -29,9 +29,9 @@ from stolon.frappe.access import (
     prohibited_flags_allowed,
     revoke_grants_except,
 )
-from stolon.frappe.client import Client, SiteConfig
-from stolon.frappe.errors import DoesNotExistError, FrappeError, PermissionError_, ValidationError
-from stolon.frappe.lifecycle import SubmitNotPermittedError
+from icedcoffee_sync.frappe.client import Client, SiteConfig
+from icedcoffee_sync.frappe.errors import DoesNotExistError, FrappeError, PermissionError_, ValidationError
+from icedcoffee_sync.frappe.lifecycle import SubmitNotPermittedError
 
 CONFIG = SiteConfig(url="https://example.test", api_key="KEY", api_secret="SECRET")  # noqa: S106
 
@@ -512,7 +512,7 @@ def test_prohibited_flags_allowed_reports_each_ptype(monkeypatch: pytest.MonkeyP
         ("Purchase Invoice", "cancel"): False,
         ("Purchase Invoice", "amend"): True,
     })
-    monkeypatch.setattr("stolon.frappe.access.Client", lambda config: client)
+    monkeypatch.setattr("icedcoffee_sync.frappe.access.Client", lambda config: client)
     result = prohibited_flags_allowed(
         CONFIG, doctype="Purchase Invoice", ptypes=frozenset({"submit", "cancel", "amend"})
     )
@@ -521,7 +521,7 @@ def test_prohibited_flags_allowed_reports_each_ptype(monkeypatch: pytest.MonkeyP
 
 def test_prohibited_flags_allowed_asks_with_no_docname(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _HasPermissionClient({("Bank Transaction", "submit"): False})
-    monkeypatch.setattr("stolon.frappe.access.Client", lambda config: client)
+    monkeypatch.setattr("icedcoffee_sync.frappe.access.Client", lambda config: client)
     prohibited_flags_allowed(CONFIG, doctype="Bank Transaction", ptypes=frozenset({"submit"}))
     assert client.calls == [{"doctype": "Bank Transaction", "docname": "", "perm_type": "submit"}]
 
@@ -536,14 +536,14 @@ def test_granted_flags_effective_reports_each_ptype(monkeypatch: pytest.MonkeyPa
         ("Account", "create"): True,
         ("Account", "delete"): True,
     })
-    monkeypatch.setattr("stolon.frappe.access.Client", lambda config: client)
+    monkeypatch.setattr("icedcoffee_sync.frappe.access.Client", lambda config: client)
     result = granted_flags_effective(CONFIG, doctype="Account", ptypes=frozenset({"read", "write", "create", "delete"}))
     assert result == {"read": True, "write": False, "create": True, "delete": True}
 
 
 def test_granted_flags_effective_asks_with_no_docname(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _HasPermissionClient({("Company", "write"): True})
-    monkeypatch.setattr("stolon.frappe.access.Client", lambda config: client)
+    monkeypatch.setattr("icedcoffee_sync.frappe.access.Client", lambda config: client)
     granted_flags_effective(CONFIG, doctype="Company", ptypes=frozenset({"write"}))
     assert client.calls == [{"doctype": "Company", "docname": "", "perm_type": "write"}]
 
@@ -701,7 +701,7 @@ def test_probe_submit_constructs_the_client_with_may_submit_lifted(monkeypatch: 
         def delete(self, doctype: str, name: str) -> Any:
             return {}
 
-    monkeypatch.setattr("stolon.frappe.access.Client", _RecordingClient)
+    monkeypatch.setattr("icedcoffee_sync.frappe.access.Client", _RecordingClient)
 
     probe_submit(CONFIG, company="Acmebike Cycling")
 
@@ -715,7 +715,7 @@ def test_probe_classifies_a_true_positive_refusal_as_refused(monkeypatch: pytest
         raise PermissionError_("No permission for Journal Entry")
 
     monkeypatch.setattr(
-        "stolon.frappe.access.Client",
+        "icedcoffee_sync.frappe.access.Client",
         _client_that(raise_permission_error, can_create=True, submit_flag=False),
     )
     probe = probe_submit(CONFIG, company="Acmebike Cycling")
@@ -736,7 +736,7 @@ def test_probe_does_not_confuse_a_total_lockout_with_a_submit_scoped_refusal(
         )
 
     monkeypatch.setattr(
-        "stolon.frappe.access.Client",
+        "icedcoffee_sync.frappe.access.Client",
         # A total lockout means the draft insert `_probe_create` makes is
         _client_that(
             raise_permission_error, can_create=False, submit_flag=False, draft_behavior=raise_permission_error
@@ -760,7 +760,7 @@ def test_probe_does_not_trust_a_doctype_level_create_yes_over_a_document_level_n
         raise AssertionError("the submit-flagged insert must not run when the draft was refused")
 
     monkeypatch.setattr(
-        "stolon.frappe.access.Client",
+        "icedcoffee_sync.frappe.access.Client",
         _client_that(unreachable, can_create=True, submit_flag=False, draft_behavior=raise_permission_error),
     )
     probe = probe_submit(CONFIG, company="Acmebike Cycling")
@@ -780,7 +780,7 @@ def test_probe_deletes_the_draft_once_create_access_is_confirmed(monkeypatch: py
 
     deleted: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        "stolon.frappe.access.Client",
+        "icedcoffee_sync.frappe.access.Client",
         _client_that(raise_permission_error, draft_behavior=succeed_with_a_name, deleted=deleted),
     )
     probe_submit(CONFIG, company="Acmebike Cycling")
@@ -797,7 +797,7 @@ def test_probe_create_raises_a_labeled_error_when_cleanup_cannot_delete_the_draf
         return {"name": "DRAFT-JV-9999"}
 
     monkeypatch.setattr(
-        "stolon.frappe.access.Client",
+        "icedcoffee_sync.frappe.access.Client",
         _client_that(
             raise_permission_error,
             draft_behavior=succeed_with_a_name,
@@ -819,7 +819,7 @@ def test_probe_create_confirms_access_on_validation_error(monkeypatch: pytest.Mo
         raise PermissionError_("no permission")
 
     monkeypatch.setattr(
-        "stolon.frappe.access.Client",
+        "icedcoffee_sync.frappe.access.Client",
         _client_that(raise_permission_error, draft_behavior=raise_validation_error),
     )
     probe = probe_submit(CONFIG, company="Acmebike Cycling")
@@ -830,7 +830,7 @@ def test_probe_create_confirms_access_on_validation_error(monkeypatch: pytest.Mo
 def test_probe_create_propagates_a_rate_limit_rather_than_confirming_access(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from stolon.frappe.errors import RateLimitError
+    from icedcoffee_sync.frappe.errors import RateLimitError
 
     def raise_rate_limit(doctype: str, doc: dict[str, Any]) -> Any:
         raise RateLimitError("slow down")
@@ -839,7 +839,7 @@ def test_probe_create_propagates_a_rate_limit_rather_than_confirming_access(
         raise AssertionError("the submit-flagged insert must not run when the draft's outcome is inconclusive")
 
     monkeypatch.setattr(
-        "stolon.frappe.access.Client",
+        "icedcoffee_sync.frappe.access.Client",
         _client_that(unreachable, draft_behavior=raise_rate_limit),
     )
     with pytest.raises(RateLimitError):
@@ -852,7 +852,7 @@ def test_probe_classifies_a_validation_stop_as_not_refused(monkeypatch: pytest.M
         raise ValidationError("Accounts is mandatory")
 
     monkeypatch.setattr(
-        "stolon.frappe.access.Client",
+        "icedcoffee_sync.frappe.access.Client",
         _client_that(raise_validation_error, can_create=True, submit_flag=True),
     )
     probe = probe_submit(CONFIG, company="Acmebike Cycling")
@@ -868,7 +868,9 @@ def test_probe_classifies_an_unexpected_success_as_not_refused(monkeypatch: pyte
     def succeed(doctype: str, doc: dict[str, Any]) -> Any:
         return {"name": "ACC-JV-2026-00001"}
 
-    monkeypatch.setattr("stolon.frappe.access.Client", _client_that(succeed, can_create=True, submit_flag=False))
+    monkeypatch.setattr(
+        "icedcoffee_sync.frappe.access.Client", _client_that(succeed, can_create=True, submit_flag=False)
+    )
     probe = probe_submit(CONFIG, company="Acmebike Cycling")
     assert probe.refused is False
     assert probe.can_create is True
@@ -883,7 +885,7 @@ def test_probe_propagates_a_failed_has_permission_call(monkeypatch: pytest.Monke
         raise AssertionError("insert must not run when has_permission itself failed")
 
     monkeypatch.setattr(
-        "stolon.frappe.access.Client",
+        "icedcoffee_sync.frappe.access.Client",
         _client_that(unreachable, has_permission_error=PermissionError_("no permission to check permissions")),
     )
     with pytest.raises(PermissionError_):
@@ -898,7 +900,7 @@ def test_probe_asks_has_permission_for_submit_with_no_docname(monkeypatch: pytes
         raise PermissionError_("no permission")
 
     monkeypatch.setattr(
-        "stolon.frappe.access.Client",
+        "icedcoffee_sync.frappe.access.Client",
         _client_that(raise_permission_error, permission_calls=calls),
     )
     probe_submit(CONFIG, company="Acmebike Cycling")
@@ -914,7 +916,7 @@ def test_probe_submit_sends_a_document_missing_mandatory_accounts(monkeypatch: p
         seen.append(doc)
         raise PermissionError_("No permission")
 
-    monkeypatch.setattr("stolon.frappe.access.Client", _client_that(record))
+    monkeypatch.setattr("icedcoffee_sync.frappe.access.Client", _client_that(record))
     probe_submit(CONFIG, company="Acmebike Cycling")
     assert seen == [
         {

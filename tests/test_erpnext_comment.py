@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from stolon.erpnext.comment import add_comment, list_comments
+from icedcoffee_sync.erpnext.comment import add_comment, list_comments
 
 
 class Recorder:

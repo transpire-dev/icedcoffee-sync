@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import dataclasses
 
-from stolon.apply.diff import CreateAccount, RenameAccount
-from stolon.apply.model import DesiredAccount, LiveAccount
-from stolon.apply.park import _next_candidate
+from icedcoffee_sync.apply.diff import CreateAccount, RenameAccount
+from icedcoffee_sync.apply.model import DesiredAccount, LiveAccount
+from icedcoffee_sync.apply.park import _next_candidate
 
 
 class CyclicChartError(ValueError):

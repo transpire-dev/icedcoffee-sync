@@ -2,9 +2,9 @@ import json
 
 import httpx2
 import pytest
-from stolon.frappe.client import AsyncClient, Client, SiteConfig, _send_args
-from stolon.frappe.errors import DoesNotExistError
-from stolon.frappe.request import Request
+from icedcoffee_sync.frappe.client import AsyncClient, Client, SiteConfig, _send_args
+from icedcoffee_sync.frappe.errors import DoesNotExistError
+from icedcoffee_sync.frappe.request import Request
 
 CONFIG = SiteConfig(url="https://example.test", api_key="KEY", api_secret="SECRET")  # noqa: S106
 
@@ -223,7 +223,7 @@ async def test_async_upload_file_sends_a_genuine_multipart_request() -> None:
 
 def test_lowercase_authorization_header_cannot_sit_alongside_the_credential() -> None:
     # HTTP header names are case-insensitive, so a lowercase `authorization`
-    from stolon.frappe.client import _merge_headers
+    from icedcoffee_sync.frappe.client import _merge_headers
 
     hostile = Request("GET", "/api/v2/document/Account", headers={"authorization": "token evil:evil"})
     headers = _merge_headers(CONFIG, hostile)

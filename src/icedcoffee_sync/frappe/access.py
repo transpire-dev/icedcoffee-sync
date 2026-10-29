@@ -12,8 +12,8 @@ from __future__ import annotations
 import dataclasses
 from typing import Any, Protocol
 
-from stolon.frappe.client import Client, SiteConfig
-from stolon.frappe.errors import DoesNotExistError, FrappeError, PermissionError_, ValidationError
+from icedcoffee_sync.frappe.client import Client, SiteConfig
+from icedcoffee_sync.frappe.errors import DoesNotExistError, FrappeError, PermissionError_, ValidationError
 
 # The Custom DocPerm flags a grant may request (Frappe version-15
 # custom_docperm.json). `if_owner` and `select` are deliberately absent: see

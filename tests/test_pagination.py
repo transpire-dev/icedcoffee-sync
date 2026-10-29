@@ -1,6 +1,6 @@
 import httpx2
 import pytest
-from stolon.frappe.client import AsyncClient, Client, SiteConfig
+from icedcoffee_sync.frappe.client import AsyncClient, Client, SiteConfig
 
 CONFIG = SiteConfig(url="https://example.test", api_key="K", api_secret="S")  # noqa: S106
 

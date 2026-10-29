@@ -1,8 +1,8 @@
 """What may be deleted, in what order, and what must not."""
 
 import pytest
-from stolon.apply.model import LiveAccount
-from stolon.apply.prune import DeleteAccount, PrunePlan, PruneReason, execute_prune, plan_prune
+from icedcoffee_sync.apply.model import LiveAccount
+from icedcoffee_sync.apply.prune import DeleteAccount, PrunePlan, PruneReason, execute_prune, plan_prune
 
 
 def live(document_name, name, parent=None, is_group=False, disabled=False):
@@ -112,7 +112,7 @@ class FakeClient:
         return {}
 
     def update(self, doctype: str, name: str, doc: dict):
-        from stolon.frappe.errors import ValidationError
+        from icedcoffee_sync.frappe.errors import ValidationError
 
         if name in self.failing_update:
             raise ValidationError("cannot disable either")
@@ -135,7 +135,7 @@ def test_execute_deletes_in_plan_order() -> None:
 
 def test_a_delete_refused_with_link_exists_falls_back_to_disable() -> None:
     # ERPNext's literal "you can disable this Account instead" refusal.
-    from stolon.frappe.errors import LinkExistsError
+    from icedcoffee_sync.frappe.errors import LinkExistsError
 
     root = live("Expenses - AB", "Expenses")
     a = live("A - AB", "A", parent="Expenses - AB")
@@ -151,7 +151,7 @@ def test_a_delete_refused_with_link_exists_falls_back_to_disable() -> None:
 
 def test_a_delete_refused_with_validation_error_falls_back_to_disable() -> None:
     # A generic business-rule refusal, distinct from both LinkExistsError
-    from stolon.frappe.errors import ValidationError
+    from icedcoffee_sync.frappe.errors import ValidationError
 
     root = live("Expenses - AB", "Expenses")
     a = live("A - AB", "A", parent="Expenses - AB")
@@ -163,7 +163,7 @@ def test_a_delete_refused_with_validation_error_falls_back_to_disable() -> None:
 
 
 def test_a_delete_refused_with_child_exists_falls_back_to_disable() -> None:
-    from stolon.frappe.errors import ChildExistsError, LinkExistsError
+    from icedcoffee_sync.frappe.errors import ChildExistsError, LinkExistsError
 
     group = live("Old Group - AB", "Old Group", parent="Expenses - AB", is_group=True)
     child = live("Old Leaf - AB", "Old Leaf", parent="Old Group - AB")
@@ -192,7 +192,7 @@ def test_a_delete_that_succeeds_on_an_already_disabled_extra_is_recorded_as_dele
 
 def test_a_delete_refused_on_an_already_disabled_extra_is_recorded_as_already_disabled() -> None:
     # The idempotency case this bucket exists for: re-disabling something
-    from stolon.frappe.errors import LinkExistsError
+    from icedcoffee_sync.frappe.errors import LinkExistsError
 
     disabled_leaf = live("Cash - AB", "Cash", parent="Expenses - AB", disabled=True)
     plan = PrunePlan([DeleteAccount(disabled_leaf)], [])
@@ -205,7 +205,7 @@ def test_a_delete_refused_on_an_already_disabled_extra_is_recorded_as_already_di
 
 
 def test_a_delete_refused_with_rate_limit_propagates_and_does_not_disable() -> None:
-    from stolon.frappe.errors import RateLimitError
+    from icedcoffee_sync.frappe.errors import RateLimitError
 
     root = live("Expenses - AB", "Expenses")
     a = live("A - AB", "A", parent="Expenses - AB")
@@ -217,7 +217,7 @@ def test_a_delete_refused_with_rate_limit_propagates_and_does_not_disable() -> N
 
 
 def test_a_disable_refused_with_rate_limit_propagates_and_is_not_recorded_as_failed() -> None:
-    from stolon.frappe.errors import LinkExistsError, RateLimitError
+    from icedcoffee_sync.frappe.errors import LinkExistsError, RateLimitError
 
     class RateLimitedOnDisable:
         def __init__(self) -> None:
@@ -240,7 +240,7 @@ def test_a_disable_refused_with_rate_limit_propagates_and_is_not_recorded_as_fai
 
 
 def test_a_delete_that_fails_and_a_disable_that_also_fails_is_recorded_as_failed() -> None:
-    from stolon.frappe.errors import LinkExistsError
+    from icedcoffee_sync.frappe.errors import LinkExistsError
 
     root = live("Expenses - AB", "Expenses")
     a = live("A - AB", "A", parent="Expenses - AB")

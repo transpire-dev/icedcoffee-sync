@@ -2,8 +2,8 @@
 
 from typing import Any
 
-from stolon.erpnext.ensure import ensure_by_name
-from stolon.frappe.errors import DoesNotExistError
+from icedcoffee_sync.erpnext.ensure import ensure_by_name
+from icedcoffee_sync.frappe.errors import DoesNotExistError
 
 
 class FakeSite:

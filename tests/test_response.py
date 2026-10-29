@@ -2,8 +2,8 @@ import json
 import pathlib
 
 import pytest
-from stolon.frappe.errors import DoesNotExistError, FrappeError, ValidationError
-from stolon.frappe.response import MISSING, envelope, field, has_next_page, unwrap
+from icedcoffee_sync.frappe.errors import DoesNotExistError, FrappeError, ValidationError
+from icedcoffee_sync.frappe.response import MISSING, envelope, field, has_next_page, unwrap
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 

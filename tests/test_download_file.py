@@ -2,7 +2,7 @@
 
 import httpx2
 import pytest
-from stolon.frappe.client import Client, FileDownloadError, SiteConfig
+from icedcoffee_sync.frappe.client import Client, FileDownloadError, SiteConfig
 
 CONFIG = SiteConfig(url="https://site.example", api_key="k", api_secret="s", timeout=5.0)  # noqa: S106
 

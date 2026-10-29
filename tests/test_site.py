@@ -1,8 +1,7 @@
 """The URL checks every ERPNext site URL passes, allowlist or not."""
 
 import pytest
-
-from stolon import site
+from icedcoffee_sync import site
 
 
 def test_userinfo_is_refused_before_anything_and_never_echoed() -> None:

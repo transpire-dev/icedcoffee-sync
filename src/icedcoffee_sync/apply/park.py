@@ -13,8 +13,8 @@ from __future__ import annotations
 import dataclasses
 from typing import Any, Protocol
 
-from stolon.apply.model import LiveAccount
-from stolon.apply.prune import PruneReason, PruneRefusal, PruneReport
+from icedcoffee_sync.apply.model import LiveAccount
+from icedcoffee_sync.apply.prune import PruneReason, PruneRefusal, PruneReport
 
 # The whitelisted rename apply itself uses; a field update does not move the document.
 RENUMBER_METHOD = "erpnext.accounts.doctype.account.account.update_account_number"

@@ -5,7 +5,7 @@ import pathlib
 from collections.abc import Sequence
 from typing import Any
 
-from stolon.erpnext import purchase as p
+from icedcoffee_sync.erpnext import purchase as p
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "purchase_order_submitted.json"
 

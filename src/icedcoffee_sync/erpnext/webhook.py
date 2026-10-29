@@ -17,7 +17,7 @@ import dataclasses
 from collections.abc import Iterable
 from typing import Any, Protocol
 
-from stolon.erpnext.ensure import ensure_by_name
+from icedcoffee_sync.erpnext.ensure import ensure_by_name
 
 DOCTYPE_WEBHOOK = "Webhook"
 PURCHASE_ORDER = "Purchase Order"

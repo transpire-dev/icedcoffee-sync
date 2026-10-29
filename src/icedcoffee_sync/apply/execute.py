@@ -7,7 +7,7 @@ first would link a child to a name about to stop existing.
 Renumbers need their own order among themselves too -- measured live,
 renumbering "Current Assets" to 1100 before "Cash In Hand" (still sitting on
 1100) vacated it died with a plain "number already used" error.
-`stolon.apply.order.order_renames` works out that order, inserting a park
+`icedcoffee_sync.apply.order.order_renames` works out that order, inserting a park
 step onto a temporary number when two or more renames form a genuine cycle.
 """
 
@@ -16,10 +16,10 @@ from __future__ import annotations
 import dataclasses
 from typing import Any, Protocol
 
-from stolon.apply.diff import ChartPlan, RenameAccount
-from stolon.apply.model import DesiredAccount, LiveAccount
-from stolon.apply.order import ParkStep, order_creates, order_renames
-from stolon.erpnext.accounts import document_name
+from icedcoffee_sync.apply.diff import ChartPlan, RenameAccount
+from icedcoffee_sync.apply.model import DesiredAccount, LiveAccount
+from icedcoffee_sync.apply.order import ParkStep, order_creates, order_renames
+from icedcoffee_sync.erpnext.accounts import document_name
 
 RENUMBER_METHOD = "erpnext.accounts.doctype.account.account.update_account_number"
 
@@ -115,7 +115,7 @@ def _swap_leading_number(old_document_name: str, old_number: str, new_number: st
 
     A document name is `"{number} - {name} - {abbr}"`; only the number
     changed, so replacing that leading prefix reproduces it without the
-    abbreviation as a separate input (mirrors `stolon.apply.park`'s
+    abbreviation as a separate input (mirrors `icedcoffee_sync.apply.park`'s
     identical fallback).
     """
     return old_document_name.replace(f"{old_number} - ", f"{new_number} - ", 1)

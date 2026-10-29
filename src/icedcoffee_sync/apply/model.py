@@ -1,7 +1,7 @@
 """What the chart wants, and what the site currently has.
 
 Neither record carries a match key. Matching the two is a tree walk
-(`stolon.apply.diff`), because an account has no usable intrinsic identity: a
+(`icedcoffee_sync.apply.diff`), because an account has no usable intrinsic identity: a
 name repeats across the chart ("Accounts Payable" is both a group and a leaf
 inside it), and the number is the thing most likely to be absent or changing --
 a site set up through ERPNext's wizard has no numbers at all. What identifies
@@ -41,5 +41,5 @@ class LiveAccount:
     root_type: str
     account_type: str | None = None
     # Defaults False so every existing construction site -- test fixtures
-    # included -- keeps working unchanged; only stolon.apply.prune reads it.
+    # included -- keeps working unchanged; only icedcoffee_sync.apply.prune reads it.
     disabled: bool = False
