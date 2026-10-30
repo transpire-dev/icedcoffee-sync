@@ -1,6 +1,6 @@
 [project]
 name = "icedcoffee-sync"
-version = "0.0.1"
+version = "0.1.0"
 description = "Typed sync and async client for the Frappe and ERPNext REST API"
 authors = [{ name = "Gavin Carothers", email = "gavin@carothers.name" }]
 requires-python = ">=3.14"
