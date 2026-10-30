@@ -3,6 +3,8 @@ name = "icedcoffee-sync"
 version = "0.1.0"
 description = "Typed sync and async client for the Frappe and ERPNext REST API"
 authors = [{ name = "Gavin Carothers", email = "gavin@carothers.name" }]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.14"
 
 dependencies = ["httpx2>=2.0.0"]
