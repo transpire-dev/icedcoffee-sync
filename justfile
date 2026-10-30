@@ -34,16 +34,9 @@ typecheck:
 deps:
     uv run deptry src
 
-# Run tests (excludes live_frappe; those need a real Frappe site)
-test:
-    uv run pytest -m "not live_frappe"
+# Run tests (excludes live_frappe, which needs a real Frappe site); extra args go to pytest
+test *args:
+    uv run pytest -m "not live_frappe" {{args}}
 
-# Run tests with JUnit output (CI)
-test-ci:
-    uv run pytest -m "not live_frappe" --junitxml=report.xml
-
-# Full validation (local dev)
+# Full static validation: lock, lint, typecheck, deps
 check: lock-check lint typecheck deps
-
-# Full validation (CI)
-check-ci: lock-check lint typecheck deps

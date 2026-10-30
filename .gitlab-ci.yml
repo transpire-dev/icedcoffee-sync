@@ -1,6 +1,9 @@
 # Image tag verified against ghcr.io/astral-sh/uv (manifest exists).
 default:
   image: ghcr.io/astral-sh/uv:python3.14-bookworm
+  before_script:
+    - uv tool install rust-just
+    - export PATH="$HOME/.local/bin:$PATH"
 
 variables:
   UV_LINK_MODE: copy
@@ -14,29 +17,17 @@ workflow:
 
 check:
   stage: test
-  before_script:
-    - uv sync --frozen
-    - uv tool install rust-just
-    - export PATH="$HOME/.local/bin:$PATH"
   script:
-    - just check-ci
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - just check
 
 test:
   stage: test
-  before_script:
-    - uv sync --frozen
   script:
-    - uv run --frozen pytest -m "not live_frappe" --junitxml=report.xml
+    - just test --junitxml=report.xml
   artifacts:
     when: always
     reports:
       junit: report.xml
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 publish-dev:
   stage: deploy
@@ -50,6 +41,7 @@ publish-dev:
 
 publish-release:
   stage: deploy
+  needs: [check, test]
   script:
     - |
       version="$(uv version --frozen --short)"
