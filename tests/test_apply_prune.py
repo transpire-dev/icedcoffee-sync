@@ -1,6 +1,7 @@
 """What may be deleted, in what order, and what must not."""
 
 import pytest
+
 from icedcoffee_sync.apply.model import LiveAccount
 from icedcoffee_sync.apply.prune import DeleteAccount, PrunePlan, PruneReason, execute_prune, plan_prune
 

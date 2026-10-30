@@ -7,6 +7,7 @@ a test that says nothing about roots produces no root changes.
 """
 
 import pytest
+
 from icedcoffee_sync.apply.diff import RefusalReason, diff
 from icedcoffee_sync.apply.model import DesiredAccount, LiveAccount
 

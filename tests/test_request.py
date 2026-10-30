@@ -1,6 +1,7 @@
 import json
 
 import pytest
+
 from icedcoffee_sync.frappe.request import (
     auth_header,
     call_method,

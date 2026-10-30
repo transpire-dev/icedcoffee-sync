@@ -3,6 +3,7 @@
 from typing import Any
 
 import pytest
+
 from icedcoffee_sync.erpnext.company import (
     DefaultNotAppliedError,
     UnknownCompanyFieldError,

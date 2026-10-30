@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+
 from icedcoffee_sync.frappe.access import (
     _ALWAYS_RESET_TO_ZERO,
     _PERMISSION_MANAGER,
