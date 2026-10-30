@@ -1,0 +1,63 @@
+# Image tag verified against ghcr.io/astral-sh/uv (manifest exists).
+default:
+  image: ghcr.io/astral-sh/uv:python3.14-bookworm
+
+variables:
+  UV_LINK_MODE: copy
+  PACKAGE_REGISTRY_URL: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/pypi"
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG =~ /^v/
+
+check:
+  stage: test
+  before_script:
+    - uv sync --frozen
+    - uv tool install rust-just
+    - export PATH="$HOME/.local/bin:$PATH"
+  script:
+    - just check-ci
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+test:
+  stage: test
+  before_script:
+    - uv sync --frozen
+  script:
+    - uv run --frozen pytest -m "not live_frappe" --junitxml=report.xml
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+publish-dev:
+  stage: deploy
+  needs: [check, test]
+  script:
+    - uv version --frozen 0.1.0.dev$CI_PIPELINE_IID
+    - uv build
+    - uv publish --publish-url "$PACKAGE_REGISTRY_URL" --username gitlab-ci-token --password "$CI_JOB_TOKEN"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+publish-release:
+  stage: deploy
+  script:
+    - |
+      version="$(uv version --frozen --short)"
+      if [ "$CI_COMMIT_TAG" != "v$version" ]; then
+        echo "Tag $CI_COMMIT_TAG does not match pyproject version v$version" >&2
+        exit 1
+      fi
+    - uv build
+    - uv publish --publish-url "$PACKAGE_REGISTRY_URL" --username gitlab-ci-token --password "$CI_JOB_TOKEN"
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
