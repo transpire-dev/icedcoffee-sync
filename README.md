@@ -52,10 +52,12 @@ config = SiteConfig(
     api_secret="your-api-secret",
 )
 
+
 async def main():
     async with AsyncClient(config) as client:
         company = await client.get("Company", "Example Company")
         print(company["name"])
+
 
 asyncio.run(main())
 ```
@@ -82,10 +84,17 @@ config = SiteConfig(
     api_secret="your-api-secret",
 )
 with Client(config) as client:
-    created = ensure_by_name(client, "Item", "EXAMPLE-ITEM", {
-        "item_code": "EXAMPLE-ITEM", "item_name": "Example Item",
-        "item_group": "All Item Groups", "stock_uom": "Nos",
-    })
+    created = ensure_by_name(
+        client,
+        "Item",
+        "EXAMPLE-ITEM",
+        {
+            "item_code": "EXAMPLE-ITEM",
+            "item_name": "Example Item",
+            "item_group": "All Item Groups",
+            "stock_uom": "Nos",
+        },
+    )
     print(created)
 ```
 
@@ -127,8 +136,7 @@ with Client(config) as client:
     plan = diff(desired, live, entries)
     print(plan)
     input("Review the diff; Enter to apply, Ctrl-C to stop: ")
-    print(apply_chart(client, plan, live, {a.number: a for a in desired},
-                      company_abbr(client, company), company))
+    print(apply_chart(client, plan, live, {a.number: a for a in desired}, company_abbr(client, company), company))
 
     live = read_chart(client, company)
     entries = accounts_with_entries(client, [a.document_name for a in live])
