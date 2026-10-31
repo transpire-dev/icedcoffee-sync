@@ -40,8 +40,10 @@ jobs:
       - run: uv python install 3.14
       - run: uvx --from rust-just just test
 
+  # A push to main publishes <pyproject version>.devN, which pip and uv skip
+  # unless asked for; a v* tag publishes the release itself.
   publish:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     needs: [check, test]
     runs-on: ubuntu-latest
     environment: pypi
@@ -59,7 +61,13 @@ jobs:
       # build, but uv has no download for a +gil request; installing the
       # regular 3.14 first gives that request something to find.
       - run: uv python install 3.14
+      - name: Stamp the dev version
+        if: github.ref == 'refs/heads/main'
+        # Setting the version rewrites pyproject.toml on purpose, which
+        # UV_LOCKED forbids; --frozen leaves uv.lock untouched instead.
+        run: env -u UV_LOCKED uv version --frozen "$(uv version --short).dev${GITHUB_RUN_NUMBER}"
       - name: Refuse a tag that is off main or disagrees with pyproject
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           TAG: ${{ github.ref_name }}
         run: |
