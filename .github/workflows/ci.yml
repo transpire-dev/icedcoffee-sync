@@ -21,6 +21,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      # .python-version asks for 3.14+gil so uv never picks a free-threaded
+      # build, but uv has no download for a +gil request; installing the
+      # regular 3.14 first gives that request something to find.
+      - run: uv python install 3.14
       - run: uvx --from rust-just just check
 
   test:
@@ -30,6 +34,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      # .python-version asks for 3.14+gil so uv never picks a free-threaded
+      # build, but uv has no download for a +gil request; installing the
+      # regular 3.14 first gives that request something to find.
+      - run: uv python install 3.14
       - run: uvx --from rust-just just test
 
   publish:
@@ -47,6 +55,10 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      # .python-version asks for 3.14+gil so uv never picks a free-threaded
+      # build, but uv has no download for a +gil request; installing the
+      # regular 3.14 first gives that request something to find.
+      - run: uv python install 3.14
       - name: Refuse a tag that is off main or disagrees with pyproject
         env:
           TAG: ${{ github.ref_name }}
