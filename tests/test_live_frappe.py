@@ -11,6 +11,7 @@ from collections.abc import Iterator
 from urllib.parse import urlsplit
 
 import pytest
+
 from icedcoffee_sync.frappe.client import Client, SiteConfig
 from icedcoffee_sync.frappe.errors import DoesNotExistError
 from icedcoffee_sync.frappe.lifecycle import DocStatus, SubmitNotPermittedError

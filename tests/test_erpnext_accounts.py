@@ -1,6 +1,7 @@
 """Naming and vocabulary facts, measured against ERPNext 16 on 2026-08-25."""
 
 import pytest
+
 from icedcoffee_sync.erpnext.accounts import (
     ACCOUNT_TYPES,
     ROOT_TYPES,

@@ -1,8 +1,10 @@
 [project]
 name = "icedcoffee-sync"
-version = "0.0.1"
+version = "0.1.0"
 description = "Typed sync and async client for the Frappe and ERPNext REST API"
 authors = [{ name = "Gavin Carothers", email = "gavin@carothers.name" }]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.14"
 
 dependencies = ["httpx2>=2.0.0"]
@@ -28,6 +30,45 @@ packages = ["src/icedcoffee_sync"]
 timeout = 180
 timeout_method = "thread"
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 markers = [
     "live_frappe: hits a real Frappe site; requires ICEDCOFFEE_TEST_* env vars",
 ]
+
+[tool.ty.environment]
+python-version = "3.14"
+
+[tool.ruff]
+target-version = "py314"
+line-length = 120
+fix = true
+
+[tool.ruff.lint]
+select = [
+    "YTT", # flake8-2020
+    "S",   # flake8-bandit
+    "B",   # flake8-bugbear
+    "A",   # flake8-builtins
+    "C4",  # flake8-comprehensions
+    "T10", # flake8-debugger
+    "SIM", # flake8-simplify
+    "I",   # isort
+    "C90", # mccabe
+    "E", "W", # pycodestyle
+    "F",   # pyflakes
+    "PGH", # pygrep-hooks
+    "UP",  # pyupgrade
+    "RUF", # ruff
+    "TRY", # tryceratops
+]
+ignore = [
+    "E501",   # LineTooLong
+    "E731",   # DoNotAssignLambda
+    "TRY003", # raise-vanilla-args
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/*" = ["S101", "S105"]
+
+[tool.ruff.format]
+preview = true

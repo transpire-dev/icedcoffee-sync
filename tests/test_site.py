@@ -1,6 +1,7 @@
 """The URL checks every ERPNext site URL passes, allowlist or not."""
 
 import pytest
+
 from icedcoffee_sync import site
 
 
