@@ -2,9 +2,9 @@
 
 A Webhook fires from `Document.run_method`, so a Purchase Order submitted from
 the desk, the REST API, or a script all ring the same bell. The body is a
-two-field template naming the document; phloem fetches the rest. The site id
-rides in a header so the gateway can tell which site's secret signs the
-request without a per-site route.
+two-field template naming the document; the receiver fetches the rest. The
+caller's site id rides in the namespace's site header, so one receiving URL can
+tell which site's secret signs the request without a per-site route.
 
 Field names are ERPNext v16's (`frappe/integrations/doctype/webhook/webhook.json`
 on version-16-hotfix). Frappe names a Webhook by prompt, so the caller sets
@@ -18,12 +18,12 @@ from collections.abc import Iterable
 from typing import Any, Protocol
 
 from icedcoffee_sync.erpnext.ensure import ensure_by_name
+from icedcoffee_sync.erpnext.namespace import Namespace
 
 DOCTYPE_WEBHOOK = "Webhook"
 PURCHASE_ORDER = "Purchase Order"
 PURCHASE_ORDER_EVENTS: tuple[str, ...] = ("on_submit", "on_update_after_submit", "on_cancel")
 
-SITE_HEADER = "X-Transpire-Site"
 TIMEOUT_SECONDS = 10
 
 # A doorbell, not the data. Frappe renders this Jinja against the document.
@@ -36,20 +36,21 @@ class _Writer(Protocol):
     def update(self, doctype: str, name: str, doc: dict[str, Any]) -> Any: ...
 
 
-def webhook_name(site_id: str, doctype: str, event: str) -> str:
-    """`transpire-<site>-<doctype slug>-<event>`; deterministic, so ensure is get-then-insert."""
+def webhook_name(namespace: Namespace, site_id: str, doctype: str, event: str) -> str:
+    """`<namespace>-<site>-<doctype slug>-<event>`; deterministic, so ensure is get-then-insert."""
     slug = doctype.lower().replace(" ", "-")
-    return f"transpire-{site_id}-{slug}-{event}"
+    return f"{namespace.name}-{site_id}-{slug}-{event}"
 
 
 @dataclasses.dataclass(frozen=True)
 class DesiredWebhook:
-    """One Webhook document as Transpire wants it on the site."""
+    """One Webhook document as the integration wants it on the site."""
 
     name: str
     doctype: str
     event: str
     request_url: str
+    site_header: str
     site_id: str
     secret: str = dataclasses.field(repr=False)
     # None means "do not touch the switch": a Webhook this creates starts off
@@ -70,7 +71,7 @@ class DesiredWebhook:
             "webhook_json": DOORBELL_TEMPLATE,
             "webhook_headers": [
                 {"key": "Content-Type", "value": "application/json"},
-                {"key": SITE_HEADER, "value": self.site_id},
+                {"key": self.site_header, "value": self.site_id},
             ],
             "enable_security": 1,
             "webhook_secret": self.secret,
@@ -80,9 +81,9 @@ class DesiredWebhook:
 
 
 def purchase_order_webhooks(
-    *, site_id: str, request_url: str, secret: str, enabled: bool | None = None
+    *, namespace: Namespace, site_id: str, request_url: str, secret: str, enabled: bool | None = None
 ) -> tuple[DesiredWebhook, ...]:
-    """The three Purchase Order Webhooks the connector listens to.
+    """The three Purchase Order Webhooks a receiver listens to, named and headed for `namespace`.
 
     `enabled` left None creates them off and leaves existing ones as they are;
     re-running provisioning with it True, once the inbound route and its topic
@@ -90,10 +91,11 @@ def purchase_order_webhooks(
     """
     return tuple(
         DesiredWebhook(
-            name=webhook_name(site_id, PURCHASE_ORDER, event),
+            name=webhook_name(namespace, site_id, PURCHASE_ORDER, event),
             doctype=PURCHASE_ORDER,
             event=event,
             request_url=request_url,
+            site_header=namespace.site_header,
             site_id=site_id,
             secret=secret,
             enabled=enabled,
@@ -113,13 +115,13 @@ class WebhookReport:
 def ensure_webhooks(client: _Writer, webhooks: Iterable[DesiredWebhook]) -> WebhookReport:
     """Create every Webhook the site lacks; re-assert the machine-owned fields on the rest.
 
-    A Transpire Webhook is ours by name, so an existing one is brought back to
-    the desired document -- URL, headers, template, secret, timeout -- rather
-    than left alone. That is what lets a re-run apply a changed gateway URL or
-    a re-derived secret after the master secret rotates; the secret is a
-    Password field Frappe never reads back, so it is always written. The
-    `enabled` switch is re-asserted only when the desired document says which
-    way (see `DesiredWebhook.enabled`).
+    A Webhook named under the caller's namespace is the caller's, so an
+    existing one is brought back to the desired document -- URL, headers,
+    template, secret, timeout -- rather than left alone. That is what lets a
+    re-run apply a changed receiver URL or a re-derived secret after the master
+    secret rotates; the secret is a Password field Frappe never reads back, so
+    it is always written. The `enabled` switch is re-asserted only when the
+    desired document says which way (see `DesiredWebhook.enabled`).
 
     Returns:
         The names created and the names updated, each in input order.
