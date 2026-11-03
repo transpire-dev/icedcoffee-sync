@@ -16,8 +16,6 @@ from typing import Any, Protocol
 
 ADD_COMMENT = "frappe.desk.form.utils.add_comment"
 DOCTYPE_COMMENT = "Comment"
-DEFAULT_EMAIL = "integration@example.com"
-DEFAULT_BY = "Transpire"
 
 
 class _Caller(Protocol):
@@ -31,10 +29,10 @@ def add_comment(
     name: str,
     content: str,
     *,
-    email: str = DEFAULT_EMAIL,
-    by: str = DEFAULT_BY,
+    email: str,
+    by: str,
 ) -> dict[str, Any]:
-    """Add a Comment to `doctype`/`name`. Returns the created Comment document."""
+    """Add a Comment to `doctype`/`name`, signed `by` <`email`>. Returns the created Comment document."""
     return client.call(
         ADD_COMMENT,
         {

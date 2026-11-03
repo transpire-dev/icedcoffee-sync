@@ -21,7 +21,9 @@ class Recorder:
 
 def test_add_comment_goes_through_add_comment_not_a_raw_insert() -> None:
     site = Recorder()
-    out = add_comment(site, "Purchase Order", "PUR-ORD-1", "Tracking 1Z999 via UPS")
+    out = add_comment(
+        site, "Purchase Order", "PUR-ORD-1", "Tracking 1Z999 via UPS", email="sync@acme.example", by="Acme"
+    )
     assert out["name"] == "cmt-1"
     path, params = site.calls[0]
     assert path == "frappe.desk.form.utils.add_comment"
@@ -29,8 +31,8 @@ def test_add_comment_goes_through_add_comment_not_a_raw_insert() -> None:
         "reference_doctype": "Purchase Order",
         "reference_name": "PUR-ORD-1",
         "content": "Tracking 1Z999 via UPS",
-        "comment_email": "integration@example.com",
-        "comment_by": "Transpire",
+        "comment_email": "sync@acme.example",
+        "comment_by": "Acme",
     }
 
 

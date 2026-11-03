@@ -12,6 +12,8 @@ import dataclasses
 from collections.abc import Iterator
 from typing import Any, Protocol
 
+from icedcoffee_sync.erpnext.namespace import Namespace
+
 DOCTYPE_PURCHASE_ORDER = "Purchase Order"
 DOCTYPE_PURCHASE_RECEIPT = "Purchase Receipt"
 DEFAULT_UOM = "Nos"
@@ -57,7 +59,13 @@ class PurchaseOrderItem:
 
 @dataclasses.dataclass(frozen=True)
 class PurchaseOrder:
-    """A Purchase Order as read from the site."""
+    """A Purchase Order as read from the site.
+
+    The `source_*` fields are the reader's namespace fields: `source_marker`
+    is the namespace's marker when the reader's integration wrote the order,
+    `source_ref` the order id it wrote it under, and `source_order_no` the
+    vendor's order number it carried.
+    """
 
     name: str
     supplier: str
@@ -73,9 +81,9 @@ class PurchaseOrder:
     order_confirmation_date: str | None
     amended_from: str | None
     modified: str
-    transpire_source: str | None
-    transpire_ref: str | None
-    transpire_order_no: str | None
+    source_marker: str | None
+    source_ref: str | None
+    source_order_no: str | None
     items: tuple[PurchaseOrderItem, ...]
 
     @property
@@ -87,8 +95,8 @@ class PurchaseOrder:
         return self.docstatus == 2
 
 
-def purchase_order_from_document(doc: dict[str, Any]) -> PurchaseOrder:
-    """Type a raw `Purchase Order` document. Pure."""
+def purchase_order_from_document(doc: dict[str, Any], namespace: Namespace) -> PurchaseOrder:
+    """Type a raw `Purchase Order` document, reading `namespace`'s fields. Pure."""
     items = tuple(
         PurchaseOrderItem(
             name=str(row.get("name", "")),
@@ -119,16 +127,16 @@ def purchase_order_from_document(doc: dict[str, Any]) -> PurchaseOrder:
         order_confirmation_date=_text(doc.get("order_confirmation_date")),
         amended_from=_text(doc.get("amended_from")),
         modified=str(doc.get("modified", "")),
-        transpire_source=_text(doc.get("transpire_source")),
-        transpire_ref=_text(doc.get("transpire_ref")),
-        transpire_order_no=_text(doc.get("transpire_order_no")),
+        source_marker=_text(doc.get(namespace.source_field)),
+        source_ref=_text(doc.get(namespace.ref_field)),
+        source_order_no=_text(doc.get(namespace.order_no_field)),
         items=items,
     )
 
 
-def read_purchase_order(client: _Getter, name: str) -> PurchaseOrder:
-    """Fetch and type one Purchase Order."""
-    return purchase_order_from_document(client.get(DOCTYPE_PURCHASE_ORDER, name))
+def read_purchase_order(client: _Getter, name: str, namespace: Namespace) -> PurchaseOrder:
+    """Fetch and type one Purchase Order, reading `namespace`'s fields."""
+    return purchase_order_from_document(client.get(DOCTYPE_PURCHASE_ORDER, name), namespace)
 
 
 def list_submitted_purchase_orders(

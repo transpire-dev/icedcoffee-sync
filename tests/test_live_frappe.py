@@ -236,9 +236,13 @@ def test_upload_file_attaches_a_private_file_to_a_document(client: Client) -> No
 
 def test_a_webhook_provisions_idempotently_and_is_deletable(client: Client) -> None:
     from icedcoffee_sync.erpnext import webhook as w
+    from icedcoffee_sync.erpnext.namespace import Namespace
 
+    ns = Namespace(name="icedcoffee_live", label="icedcoffee live", site_header="X-Icedcoffee-Live-Site")
     site_id = f"live-{uuid.uuid4().hex[:8]}"
-    hooks = w.purchase_order_webhooks(site_id=site_id, request_url="https://example.invalid/frappe", secret="x" * 64)
+    hooks = w.purchase_order_webhooks(
+        namespace=ns, site_id=site_id, request_url="https://example.invalid/frappe", secret="x" * 64
+    )
     try:
         first = w.ensure_webhooks(client, hooks)
         assert first.created == [h.name for h in hooks]
@@ -246,7 +250,7 @@ def test_a_webhook_provisions_idempotently_and_is_deletable(client: Client) -> N
         assert second.created == [] and second.updated == [h.name for h in hooks]
         got = client.get(w.DOCTYPE_WEBHOOK, hooks[0].name)
         assert got["webhook_docevent"] == "on_submit"
-        assert {h["key"] for h in got["webhook_headers"]} == {"Content-Type", w.SITE_HEADER}
+        assert {h["key"] for h in got["webhook_headers"]} == {"Content-Type", ns.site_header}
     finally:
         for hook in hooks:
             with contextlib.suppress(DoesNotExistError):
@@ -255,11 +259,13 @@ def test_a_webhook_provisions_idempotently_and_is_deletable(client: Client) -> N
 
 def test_submitted_purchase_orders_list_and_read(client: Client) -> None:
     from icedcoffee_sync.erpnext import purchase as p
+    from icedcoffee_sync.erpnext.namespace import Namespace
 
+    ns = Namespace(name="icedcoffee_live", label="icedcoffee live", site_header="X-Icedcoffee-Live-Site")
     rows = list(p.list_submitted_purchase_orders(client, modified_after=None, page_size=5))
     if not rows:
         pytest.skip("test site holds no submitted Purchase Orders")
-    po = p.read_purchase_order(client, rows[0]["name"])
+    po = p.read_purchase_order(client, rows[0]["name"], ns)
     # The listing deliberately includes cancelled documents, so the first row
     # may be either; what matters is that a finalized document reads with lines.
     assert (po.is_submitted or po.is_cancelled) and po.items
@@ -270,6 +276,6 @@ def test_a_comment_lands_on_the_document_and_lists_back(note: tuple[Client, str,
 
     client, name, _title = note
     text = f"icedcoffee-sync live comment {uuid.uuid4()}"
-    created = add_comment(client, "Note", name, text)
+    created = add_comment(client, "Note", name, text, email="integration@example.com", by="icedcoffee-sync")
     assert created["reference_name"] == name
     assert any(c["content"] == text for c in list_comments(client, "Note", name))

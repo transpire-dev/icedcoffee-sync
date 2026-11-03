@@ -1,23 +1,30 @@
-"""The Frappe Webhook documents that ring phloem's doorbell."""
+"""The Frappe Webhook documents that ring a receiver's doorbell."""
 
 import json
 
 from icedcoffee_sync.erpnext import webhook as w
+from icedcoffee_sync.erpnext.namespace import Namespace
+
+ACME = Namespace(name="acme", label="Acme", site_header="X-Acme-Site")
 
 SECRET = "7dc9c9544e17e1867efde0506bca3dacaaa5d11f661560591bc1acf0924e8c86"
 
 
 def test_three_purchase_order_webhooks_named_deterministically() -> None:
-    hooks = w.purchase_order_webhooks(site_id="site-1", request_url="https://gw.example/frappe", secret=SECRET)
+    hooks = w.purchase_order_webhooks(
+        namespace=ACME, site_id="site-1", request_url="https://gw.example/frappe", secret=SECRET
+    )
     assert [h.name for h in hooks] == [
-        "transpire-site-1-purchase-order-on_submit",
-        "transpire-site-1-purchase-order-on_update_after_submit",
-        "transpire-site-1-purchase-order-on_cancel",
+        "acme-site-1-purchase-order-on_submit",
+        "acme-site-1-purchase-order-on_update_after_submit",
+        "acme-site-1-purchase-order-on_cancel",
     ]
 
 
 def test_the_document_uses_the_v16_field_names_and_a_two_field_json_template() -> None:
-    hook = w.purchase_order_webhooks(site_id="site-1", request_url="https://gw.example/frappe", secret=SECRET)[0]
+    hook = w.purchase_order_webhooks(
+        namespace=ACME, site_id="site-1", request_url="https://gw.example/frappe", secret=SECRET
+    )[0]
     doc = hook.as_document()
     assert doc["name"] == hook.name
     assert doc["webhook_doctype"] == "Purchase Order"
@@ -29,12 +36,12 @@ def test_the_document_uses_the_v16_field_names_and_a_two_field_json_template() -
     # Disabled by default: deliveries start only once the inbound route exists.
     assert doc["enabled"] == 0 and doc["timeout"] == 10
     live = w.purchase_order_webhooks(
-        site_id="site-1", request_url="https://gw.example/frappe", secret=SECRET, enabled=True
+        namespace=ACME, site_id="site-1", request_url="https://gw.example/frappe", secret=SECRET, enabled=True
     )
     assert live[0].as_document()["enabled"] == 1
     assert {h["key"]: h["value"] for h in doc["webhook_headers"]} == {
         "Content-Type": "application/json",
-        "X-Transpire-Site": "site-1",
+        "X-Acme-Site": "site-1",
     }
     # The template is a doorbell: the document's identity and nothing else.
     rendered = doc["webhook_json"].replace("{{ doc.doctype }}", "Purchase Order").replace("{{ doc.name }}", "PUR-ORD-1")
@@ -42,7 +49,9 @@ def test_the_document_uses_the_v16_field_names_and_a_two_field_json_template() -
 
 
 def test_the_secret_never_appears_in_the_repr() -> None:
-    hook = w.purchase_order_webhooks(site_id="site-1", request_url="https://gw.example/frappe", secret=SECRET)[0]
+    hook = w.purchase_order_webhooks(
+        namespace=ACME, site_id="site-1", request_url="https://gw.example/frappe", secret=SECRET
+    )[0]
     assert SECRET not in repr(hook)
 
 
@@ -51,7 +60,7 @@ def test_ensure_creates_the_missing_ones_and_reasserts_the_rest() -> None:
 
     class Site:
         def __init__(self) -> None:
-            self.have = {"transpire-site-1-purchase-order-on_submit"}
+            self.have = {"acme-site-1-purchase-order-on_submit"}
             self.inserted: list[str] = []
             self.updated: list[tuple[str, dict]] = []
 
@@ -70,13 +79,15 @@ def test_ensure_creates_the_missing_ones_and_reasserts_the_rest() -> None:
             return {"name": name, **doc}
 
     site = Site()
-    hooks = w.purchase_order_webhooks(site_id="site-1", request_url="https://gw.example/frappe", secret=SECRET)
+    hooks = w.purchase_order_webhooks(
+        namespace=ACME, site_id="site-1", request_url="https://gw.example/frappe", secret=SECRET
+    )
     first = w.ensure_webhooks(site, hooks)
     assert first.created == [
-        "transpire-site-1-purchase-order-on_update_after_submit",
-        "transpire-site-1-purchase-order-on_cancel",
+        "acme-site-1-purchase-order-on_update_after_submit",
+        "acme-site-1-purchase-order-on_cancel",
     ]
-    assert first.updated == ["transpire-site-1-purchase-order-on_submit"]
+    assert first.updated == ["acme-site-1-purchase-order-on_submit"]
     # The existing one was brought back to the desired document, secret included,
     # and its name was not sent as a field to change.
     _name, doc = site.updated[0]
@@ -85,7 +96,9 @@ def test_ensure_creates_the_missing_ones_and_reasserts_the_rest() -> None:
     # Nothing said which way the switch should go, so the existing Webhook keeps its own.
     assert "enabled" not in doc
 
-    rotated = w.purchase_order_webhooks(site_id="site-1", request_url="https://gw2.example/frappe", secret="y" * 64)
+    rotated = w.purchase_order_webhooks(
+        namespace=ACME, site_id="site-1", request_url="https://gw2.example/frappe", secret="y" * 64
+    )
     second = w.ensure_webhooks(site, rotated)
     assert second.created == [] and len(second.updated) == 3
     assert all(doc["request_url"] == "https://gw2.example/frappe" for _, doc in site.updated[1:])
@@ -96,7 +109,11 @@ def test_ensure_creates_the_missing_ones_and_reasserts_the_rest() -> None:
         w.ensure_webhooks(
             site,
             w.purchase_order_webhooks(
-                site_id="site-1", request_url="https://gw2.example/frappe", secret=SECRET, enabled=enabled
+                namespace=ACME,
+                site_id="site-1",
+                request_url="https://gw2.example/frappe",
+                secret=SECRET,
+                enabled=enabled,
             ),
         )
         assert {doc["enabled"] for _, doc in site.updated} == {expected}

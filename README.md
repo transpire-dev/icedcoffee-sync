@@ -98,9 +98,35 @@ with Client(config) as client:
     print(created)
 ```
 
+- `icedcoffee_sync.erpnext.documents`: Supplier, Item and Purchase Order documents, and the Custom Fields that mark them as yours.
+- `icedcoffee_sync.erpnext.webhook`: provision Purchase Order Webhooks pointed at your receiver.
 - `icedcoffee_sync.erpnext.purchase`: typed Purchase Order reads and draft Purchase Receipt documents.
 - `icedcoffee_sync.erpnext.company`: validate, set and clear Company default-account links.
 - `icedcoffee_sync.erpnext.comment`: add and list comments on documents.
+
+### Your namespace
+
+The documents, Webhooks and Purchase Order reads take a `Namespace`: the names
+your integration leaves on a site. `name` prefixes the Custom Fields
+(`<name>_source`, `<name>_ref`, `<name>_order_no`) and the Webhook names, and
+is the marker stamped on every document you write. `label` prefixes the field
+labels a person sees on the form. `site_header` carries your site id on each
+Webhook delivery, so one receiving URL can tell sites apart.
+
+```python
+from icedcoffee_sync.erpnext.documents import DesiredSupplier, custom_fields
+from icedcoffee_sync.erpnext.namespace import Namespace
+
+ns = Namespace(name="acme", label="Acme", site_header="X-Acme-Site")
+fields = custom_fields(ns)  # ensure these before writing documents
+supplier = DesiredSupplier(vendor_id="v-123", supplier_name="Example Supplier")
+print(supplier.as_document(namespace=ns))
+# {'supplier_name': 'Example Supplier', 'disabled': 0, 'acme_source': 'acme', 'acme_ref': 'v-123'}
+```
+
+Pick the namespace once per site. Documents written under one name are
+invisible to readers under another, and the old fields and Webhooks stay on
+the site.
 
 ## Reconciliation
 

@@ -6,8 +6,11 @@ from collections.abc import Sequence
 from typing import Any
 
 from icedcoffee_sync.erpnext import purchase as p
+from icedcoffee_sync.erpnext.namespace import Namespace
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "purchase_order_submitted.json"
+# The namespace the fixture's order was written under (see fixtures/README.md).
+WRITER = Namespace(name="transpire", label="Transpire", site_header="X-Transpire-Site")
 
 
 def _doc() -> dict[str, Any]:
@@ -15,21 +18,28 @@ def _doc() -> dict[str, Any]:
 
 
 def test_a_submitted_purchase_order_reads_into_a_typed_record() -> None:
-    po = p.purchase_order_from_document(_doc())
+    po = p.purchase_order_from_document(_doc(), WRITER)
     assert po.name.startswith("PUR-ORD-")
     assert po.supplier == "SUP"
     assert po.company == "Acmebike Cycles" and po.currency == "USD"
     assert po.docstatus == 1 and po.is_submitted and not po.is_cancelled
-    assert po.transpire_source == "transpire" and po.transpire_order_no == "0001ABCD"
+    assert po.source_marker == "transpire" and po.source_order_no == "0001ABCD"
+    assert po.source_ref == "ord_0123456789abcdef"
     assert po.order_confirmation_no is None
     assert po.amended_from is None
     assert po.items and po.items[0].item_code == "IT0001" and po.items[0].qty == 1.0 and po.items[0].uom == "Nos"
 
 
+def test_another_namespace_reads_none_of_the_writers_fields() -> None:
+    other = Namespace(name="acme", label="Acme", site_header="X-Acme-Site")
+    po = p.purchase_order_from_document(_doc(), other)
+    assert (po.source_marker, po.source_ref, po.source_order_no) == (None, None, None)
+
+
 def test_empty_strings_read_as_none() -> None:
     doc = _doc()
     doc["order_confirmation_no"] = ""
-    assert p.purchase_order_from_document(doc).order_confirmation_no is None
+    assert p.purchase_order_from_document(doc, WRITER).order_confirmation_no is None
 
 
 def test_set_order_confirmation_updates_exactly_two_fields() -> None:

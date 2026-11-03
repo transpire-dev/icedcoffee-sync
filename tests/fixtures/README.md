@@ -245,7 +245,9 @@ detection.
 Captured 2026-09-03 by a one-off script against `example-demo-sites.invalid`
 (Acmebike's demo ERPNext site): `GET /api/v2/document/Purchase Order/<name>` for
 the Purchase Order carrying `transpire_order_no` `0001ABCD`, written raw and
-unstripped, as `read_purchase_order` needs to parse the real shape.
+unstripped, as `read_purchase_order` needs to parse the real shape. The order
+was written under the namespace `transpire`, so its `transpire_*` fields are
+what a reader in that namespace sees and a reader in any other sees as absent.
 
 Two fields were edited by hand after capture: **`docstatus`** (`0` → `1`) and
 **`status`** (`"Draft"` → `"To Receive and Bill"`). The captured PO is still a
